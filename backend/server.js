@@ -180,8 +180,9 @@ if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");
   app.use(express.static(frontendPath));
   
-  // This is the specific syntax required for Express 5 / Node 22 catch-all
-  app.get("*", (req, res, next) => { 
+  // FIXED: Added a name 'splat' to the wildcard '*'
+  // This satisfies the Express 5 / path-to-regexp requirement
+  app.get("/*splat", (req, res, next) => { 
     if (req.path.startsWith("/api")) {
       return next();
     }

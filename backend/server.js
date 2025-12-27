@@ -180,8 +180,12 @@ app.use("/api/parent/messages", parentMessageRoutes);
 if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");
   app.use(express.static(frontendPath));
-  app.get("*", (req, res) => {
-    if (!req.path.startsWith("/api")) res.sendFile(path.resolve(frontendPath, "index.html"));
+  
+  // Express 5 compatibility ke liye syntax badla gaya hai
+  app.get("(.*)", (req, res) => { 
+    if (!req.path.startsWith("/api")) {
+      res.sendFile(path.resolve(frontendPath, "index.html"));
+    }
   });
 }
 

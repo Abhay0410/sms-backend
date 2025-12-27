@@ -182,11 +182,12 @@ if (isProd) {
   app.use(express.static(frontendPath));
   
   // Express 5 compatibility ke liye syntax badla gaya hai
-  app.get("(.*)", (req, res) => { 
-    if (!req.path.startsWith("/api")) {
-      res.sendFile(path.resolve(frontendPath, "index.html"));
-    }
-  });
+// Use :splat* to catch all routes in Express 5
+app.get("/:splat*", (req, res) => { 
+  if (!req.path.startsWith("/api")) {
+    res.sendFile(path.resolve(frontendPath, "index.html"));
+  }
+});
 }
 
 app.use(errorHandler);

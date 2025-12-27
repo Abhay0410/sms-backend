@@ -176,18 +176,17 @@ app.use("/api/parent/announcements", parentAnnouncementRoutes);
 app.use("/api/parent/timetable", parentTimetableRoutes);
 app.use("/api/parent/messages", parentMessageRoutes);
 
-// Frontend SPA support
 if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");
   app.use(express.static(frontendPath));
   
-  // Express 5 compatibility ke liye syntax badla gaya hai
-// Use :splat* to catch all routes in Express 5
-app.get("/:splat*", (req, res) => { 
-  if (!req.path.startsWith("/api")) {
+  // This is the specific syntax required for Express 5 / Node 22 catch-all
+  app.get("*", (req, res, next) => { 
+    if (req.path.startsWith("/api")) {
+      return next();
+    }
     res.sendFile(path.resolve(frontendPath, "index.html"));
-  }
-});
+  });
 }
 
 app.use(errorHandler);

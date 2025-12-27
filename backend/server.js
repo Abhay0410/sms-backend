@@ -180,16 +180,16 @@ if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");
   app.use(express.static(frontendPath));
   
-  // FIXED: Added a name 'splat' to the wildcard '*'
-  // This satisfies the Express 5 / path-to-regexp requirement
   app.get("/*splat", (req, res, next) => { 
-    if (req.path.startsWith("/api")) {
+    // originalUrl check karna zyada safe hota hai
+    if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/health")) {
       return next();
     }
     res.sendFile(path.resolve(frontendPath, "index.html"));
   });
 }
 
+// Error handler humesha sabse niche hona chahiye
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;

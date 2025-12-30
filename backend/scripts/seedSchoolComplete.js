@@ -109,7 +109,7 @@ const buildClassesForSchool = (schoolId, academicYear) => {
       className,
       classNumeric: 11,
       academicYear,
-      sections,
+      sections: [],
       commonSubjects: subjects.map((s) => s.name),
       isActive: true,
     });
@@ -142,7 +142,7 @@ const buildClassesForSchool = (schoolId, academicYear) => {
       className,
       classNumeric: 12,
       academicYear,
-      sections,
+      sections: [],
       commonSubjects: subjects.map((s) => s.name),
       isActive: true,
     });

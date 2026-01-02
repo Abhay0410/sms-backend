@@ -8,7 +8,8 @@ import {
   getTeacherById,
   updateTeacher,
   deleteTeacher,
-  assignClassToTeacher,
+  assignClassTeacher,
+  assignSubjectTeacher,
   updateTeacherStatus,
   toggleTeacherStatus
 } from "../../controllers/admin/admin.teacher.controller.js";
@@ -30,7 +31,8 @@ router.put("/:teacherId", updateTeacher);
 router.delete("/:teacherId", deleteTeacher);
 
 // Teacher assignments
-router.post("/:teacherId/assign-class", assignClassToTeacher);
+router.post("/:teacherId/assign-class", assignClassTeacher);
+router.post("/:teacherId/assign-subject", assignSubjectTeacher);
 
 // Teacher status
 router.put("/:teacherId/status", updateTeacherStatus);

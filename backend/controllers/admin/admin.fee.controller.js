@@ -14,16 +14,93 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 
+// export const getStudentsWithFees = asyncHandler(async (req, res) => {
+//   const { academicYear, search, page = 1, limit = 50 } = req.query;
+//   const schoolId = req.schoolId;
+
+//   if (!academicYear) {
+//     throw new ValidationError("Academic year is required");
+//   }
+
+//   // Base filter
+//   let filter = { schoolId, academicYear, role: 'student' };
+//   if (search) {
+//     filter.$or = [
+//       { name: { $regex: search, $options: 'i' } },
+//       { studentID: { $regex: search, $options: 'i' } },
+//       { className: { $regex: search, $options: 'i' } },
+//     ];
+//   }
+
+//   const options = {
+//     page: parseInt(page),
+//     limit: parseInt(limit),
+//     sort: { createdAt: -1 },
+//     lean: true
+//   };
+
+//   // Student ko lean fetch karo, populate feeDetails
+//   const students = await Student.paginate(filter, options);
+//   const studentsList = students.docs;
+
+//   // Har student ke liye FeePayment fetch karo
+//   const studentsWithFees = await Promise.all(
+//     studentsList.map(async (student) => {
+//       const feePayment = await FeePayment.findOne({
+//         student: student._id,
+//         academicYear,
+//         schoolId
+//       }).lean();
+
+//       let feeDetails = null;
+//       if (feePayment) {
+//         const totalFee = feePayment.totalDue;
+//         const paidAmount = feePayment.totalPaid;
+//         const pendingAmount = feePayment.balancePending;
+//         const status = feePayment.status;
+
+//         feeDetails = {
+//           totalFee,
+//           paidAmount,
+//           pendingAmount,
+//           status,
+//           classHasFeeStructure: true,
+//           feePaymentId: feePayment._id
+//         };
+//       } else {
+//         feeDetails = {
+//           status: "NOT_SET",
+//           classHasFeeStructure: false
+//         };
+//       }
+
+//       return {
+//         ...student,
+//         feeDetails
+//       };
+//     })
+//   );
+
+//   return successResponse(res, "Students with fee data fetched", {
+//     students: studentsWithFees,
+//     pagination: {
+//       current: students.page,
+//       pages: students.totalPages,
+//       total: students.totalDocs
+//     }
+//   });
+// });
+
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  const { academicYear, search, page = 1, limit = 50 } = req.query;
+  const { academicYear, search, status, page = 1, limit = 50 } = req.query;
   const schoolId = req.schoolId;
 
   if (!academicYear) {
     throw new ValidationError("Academic year is required");
   }
 
-  // Base filter
   let filter = { schoolId, academicYear, role: 'student' };
+
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -39,49 +116,36 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     lean: true
   };
 
-  // Student ko lean fetch karo, populate feeDetails
   const students = await Student.paginate(filter, options);
-  const studentsList = students.docs;
 
-  // Har student ke liye FeePayment fetch karo
-  const studentsWithFees = await Promise.all(
-    studentsList.map(async (student) => {
-      const feePayment = await FeePayment.findOne({
-        student: student._id,
-        academicYear,
-        schoolId
-      }).lean();
+  const studentsWithFees = [];
 
-      let feeDetails = null;
-      if (feePayment) {
-        const totalFee = feePayment.totalDue;
-        const paidAmount = feePayment.totalPaid;
-        const pendingAmount = feePayment.balancePending;
-        const status = feePayment.status;
+  for (const student of students.docs) {
+    const feePayment = await FeePayment.findOne({
+      student: student._id,
+      academicYear,
+      schoolId
+    }).lean();
 
-        feeDetails = {
-          totalFee,
-          paidAmount,
-          pendingAmount,
-          status,
-          classHasFeeStructure: true,
-          feePaymentId: feePayment._id
-        };
-      } else {
-        feeDetails = {
-          status: "NOT_SET",
-          classHasFeeStructure: false
-        };
+    if (!feePayment) continue;
+
+    // ✅ STATUS FILTERING
+    if (status === "paid" && feePayment.status !== "PAID") continue;
+    if (status === "unpaid" && feePayment.status === "PAID") continue;
+
+    studentsWithFees.push({
+      ...student,
+      feeDetails: {
+        totalFee: feePayment.totalDue,
+        paidAmount: feePayment.totalPaid,
+        pendingAmount: feePayment.balancePending,
+        status: feePayment.status,
+        feePaymentId: feePayment._id
       }
+    });
+  }
 
-      return {
-        ...student,
-        feeDetails
-      };
-    })
-  );
-
-  return successResponse(res, "Students with fee data fetched", {
+  return successResponse(res, "Students filtered successfully", {
     students: studentsWithFees,
     pagination: {
       current: students.page,
@@ -90,6 +154,7 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     }
   });
 });
+
 
 export const createFeeHead = asyncHandler(async (req, res) => {
   const { name, type, description } = req.body;

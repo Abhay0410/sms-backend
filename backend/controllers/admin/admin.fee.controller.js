@@ -14,16 +14,158 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 
+// export const getStudentsWithFees = asyncHandler(async (req, res) => {
+//   const { academicYear, search, page = 1, limit = 50 } = req.query;
+//   const schoolId = req.schoolId;
+
+//   if (!academicYear) {
+//     throw new ValidationError("Academic year is required");
+//   }
+
+//   // Base filter
+//   let filter = { schoolId, academicYear, role: 'student' };
+//   if (search) {
+//     filter.$or = [
+//       { name: { $regex: search, $options: 'i' } },
+//       { studentID: { $regex: search, $options: 'i' } },
+//       { className: { $regex: search, $options: 'i' } },
+//     ];
+//   }
+
+//   const options = {
+//     page: parseInt(page),
+//     limit: parseInt(limit),
+//     sort: { createdAt: -1 },
+//     lean: true
+//   };
+
+//   // Student ko lean fetch karo, populate feeDetails
+//   const students = await Student.paginate(filter, options);
+//   const studentsList = students.docs;
+
+//   // Har student ke liye FeePayment fetch karo
+//   const studentsWithFees = await Promise.all(
+//     studentsList.map(async (student) => {
+//       const feePayment = await FeePayment.findOne({
+//         student: student._id,
+//         academicYear,
+//         schoolId
+//       }).lean();
+
+//       let feeDetails = null;
+//       if (feePayment) {
+//         const totalFee = feePayment.totalDue;
+//         const paidAmount = feePayment.totalPaid;
+//         const pendingAmount = feePayment.balancePending;
+//         const status = feePayment.status;
+
+//         feeDetails = {
+//           totalFee,
+//           paidAmount,
+//           pendingAmount,
+//           status,
+//           classHasFeeStructure: true,
+//           feePaymentId: feePayment._id
+//         };
+//       } else {
+//         feeDetails = {
+//           status: "NOT_SET",
+//           classHasFeeStructure: false
+//         };
+//       }
+
+//       return {
+//         ...student,
+//         feeDetails
+//       };
+//     })
+//   );
+
+//   return successResponse(res, "Students with fee data fetched", {
+//     students: studentsWithFees,
+//     pagination: {
+//       current: students.page,
+//       pages: students.totalPages,
+//       total: students.totalDocs
+//     }
+//   });
+// });
+
+// export const getStudentsWithFees = asyncHandler(async (req, res) => {
+//   const { academicYear, search, status, page = 1, limit = 50 } = req.query;
+//   const schoolId = req.schoolId;
+
+//   if (!academicYear) {
+//     throw new ValidationError("Academic year is required");
+//   }
+
+//   let filter = { schoolId, academicYear, role: 'student' };
+
+//   if (search) {
+//     filter.$or = [
+//       { name: { $regex: search, $options: 'i' } },
+//       { studentID: { $regex: search, $options: 'i' } },
+//       { className: { $regex: search, $options: 'i' } },
+//     ];
+//   }
+
+//   const options = {
+//     page: parseInt(page),
+//     limit: parseInt(limit),
+//     sort: { createdAt: -1 },
+//     lean: true
+//   };
+
+//   const students = await Student.paginate(filter, options);
+
+//   const studentsWithFees = [];
+
+//   for (const student of students.docs) {
+//     const feePayment = await FeePayment.findOne({
+//       student: student._id,
+//       academicYear,
+//       schoolId
+//     }).lean();
+
+//     if (!feePayment) continue;
+
+//     // ✅ STATUS FILTERING
+//     if (status === "paid" && feePayment.status !== "PAID") continue;
+//     if (status === "unpaid" && feePayment.status === "PAID") continue;
+
+//     studentsWithFees.push({
+//       ...student,
+//       feeDetails: {
+//         totalFee: feePayment.totalDue,
+//         paidAmount: feePayment.totalPaid,
+//         pendingAmount: feePayment.balancePending,
+//         status: feePayment.status,
+//         feePaymentId: feePayment._id
+//       }
+//     });
+//   }
+
+//   return successResponse(res, "Students filtered successfully", {
+//     students: studentsWithFees,
+//     pagination: {
+//       current: students.page,
+//       pages: students.totalPages,
+//       total: students.totalDocs
+//     }
+//   });
+// });
+
+
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  const { academicYear, search, page = 1, limit = 50 } = req.query;
+  const { academicYear, search, status, page = 1, limit = 50 } = req.query;
   const schoolId = req.schoolId;
 
   if (!academicYear) {
     throw new ValidationError("Academic year is required");
   }
 
-  // Base filter
   let filter = { schoolId, academicYear, role: 'student' };
+
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -39,49 +181,55 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     lean: true
   };
 
-  // Student ko lean fetch karo, populate feeDetails
   const students = await Student.paginate(filter, options);
-  const studentsList = students.docs;
 
-  // Har student ke liye FeePayment fetch karo
-  const studentsWithFees = await Promise.all(
-    studentsList.map(async (student) => {
-      const feePayment = await FeePayment.findOne({
-        student: student._id,
-        academicYear,
-        schoolId
-      }).lean();
+  const studentsWithFees = [];
 
-      let feeDetails = null;
-      if (feePayment) {
-        const totalFee = feePayment.totalDue;
-        const paidAmount = feePayment.totalPaid;
-        const pendingAmount = feePayment.balancePending;
-        const status = feePayment.status;
+  for (const student of students.docs) {
+    const feePayment = await FeePayment.findOne({
+      student: student._id,
+      academicYear,
+      schoolId
+    }).lean();
 
-        feeDetails = {
-          totalFee,
-          paidAmount,
-          pendingAmount,
-          status,
+    // 🟢 CASE 1: FeePayment exists
+    if (feePayment) {
+      // ✅ STATUS FILTERING
+      if (status === "paid" && feePayment.status !== "PAID") continue;
+      if (status === "unpaid" && feePayment.status === "PAID") continue;
+
+      studentsWithFees.push({
+        ...student,
+        feeDetails: {
+          totalFee: feePayment.totalDue ?? feePayment.totalAmount ?? 0,
+          paidAmount: feePayment.totalPaid ?? feePayment.paidAmount ?? 0,
+          pendingAmount: feePayment.balancePending ?? 0,
+          status: feePayment.status,
           classHasFeeStructure: true,
           feePaymentId: feePayment._id
-        };
-      } else {
-        feeDetails = {
-          status: "NOT_SET",
-          classHasFeeStructure: false
-        };
-      }
+        }
+      });
+    }
+    // 🟢 CASE 2: FeePayment DOES NOT exist (0 payment student)
+    else {
+      // unpaid filter me hi dikhana hai
+      if (status === "paid") continue;
 
-      return {
+      studentsWithFees.push({
         ...student,
-        feeDetails
-      };
-    })
-  );
+        feeDetails: {
+          totalFee: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          status: "NOT_SET",
+          classHasFeeStructure: false,
+          feePaymentId: null
+        }
+      });
+    }
+  }
 
-  return successResponse(res, "Students with fee data fetched", {
+  return successResponse(res, "Students fetched successfully", {
     students: studentsWithFees,
     pagination: {
       current: students.page,
@@ -90,6 +238,8 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     }
   });
 });
+
+
 
 export const createFeeHead = asyncHandler(async (req, res) => {
   const { name, type, description } = req.body;
@@ -668,99 +818,386 @@ export const recordPayment = asyncHandler(async (req, res) => {
 // 5. STATISTICS & REPORTS
 // ==========================================
 
+// export const getFeeStatistics = asyncHandler(async (req, res) => {
+//   const { academicYear } = req.query;
+
+//   if (!academicYear) {
+//     return successResponse(res, 'Statistics calculated', {
+//       academicYear: getCurrentAcademicYear(),
+//       totalStudents: 0,
+//       totalExpected: 0,
+//       totalCollected: 0,
+//       totalPending: 0,
+//       collectionPercentage: 0,
+//       paymentStatus: {  completed: 0, partial: 0, pending: 0, overdue: 0 },
+//       installmentStats: { total: 0, paid: 0, partial: 0, pending: 0, overdue: 0 }
+//     });
+//   }
+
+//   // 1) Students count
+//   const totalStudents = await Student.countDocuments({
+//     schoolId: req.schoolId,
+//     academicYear,
+//     status: { $in: ['ENROLLED', 'ACTIVE'] }
+//   });
+
+//   // 2) Saare feePayments simple find se lao
+//   const students = await Student.find({
+//   schoolId: req.schoolId,
+//   academicYear,
+//   status: { $in: ['ENROLLED', 'ACTIVE'] }
+// }).select('_id').lean();
+
+// const feePayments = await FeePayment.find({
+//   schoolId: req.schoolId,
+//   academicYear
+// }).lean();
+
+// // ===== PAID / UNPAID STUDENT COUNT =====
+// const paidStudentIds = new Set(
+//   feePayments
+//     .filter(f => f.status === 'PAID')
+//     .map(f => String(f.student))
+// );
+
+// const unpaidStudentIds = new Set();
+
+// students.forEach(s => {
+//   if (!paidStudentIds.has(String(s._id))) {
+//     unpaidStudentIds.add(String(s._id));
+//   }
+// });
+
+
+//   let totalExpected = 0;
+//   let totalCollected = 0;
+//   let totalPending = 0;
+
+//   let completed = paidStudentIds.size;
+// let pending = unpaidStudentIds.size;
+// let partial = feePayments.filter(f => f.status === 'PARTIALLY_PAID').length;
+// let overdue = feePayments.filter(f => f.status === 'OVERDUE').length;
+
+
+//   let totalInstallments = 0;
+//   let paidInstallments = 0;
+//   let partialInstallments = 0;
+//   let pendingInstallments = 0;
+//   let overdueInstallments = 0;
+
+//   for (const fee of feePayments) {
+//     // yahan dono naming variants support kar rahe hain
+//     totalExpected += fee.totalDue ?? fee.totalAmount ?? 0;
+//     totalCollected += fee.totalPaid ?? fee.paidAmount ?? 0;
+//     totalPending += fee.balancePending ?? 0;
+
+
+//     const installments = fee.installments || [];
+//     totalInstallments += installments.length;
+
+//     for (const inst of installments) {
+//       if (inst.status === 'PAID') paidInstallments++;
+//       else if (inst.status === 'PARTIAL') partialInstallments++;
+//       else if (inst.status === 'PENDING') pendingInstallments++;
+//       else if (inst.status === 'OVERDUE') overdueInstallments++;
+//     }
+//   }
+
+//   const collectionPercentage =
+//     totalStudents > 0 && totalExpected > 0
+//       ? Math.round((totalCollected / totalExpected) * 100)
+//       : 0;
+
+//   // return successResponse(res, 'Fee statistics retrieved successfully', {
+//   //   academicYear,
+//   //   totalStudents,
+//   //   totalExpected,
+//   //   totalCollected,
+//   //   totalPending,
+//   //   collectionPercentage: Math.max(0, Math.min(100, collectionPercentage)),
+//   //   paymentStatus: {
+//   //     completed,
+//   //     partial,
+//   //     pending,
+//   //     overdue
+//   //   },
+//   //   installmentStats: {
+//   //     total: totalInstallments,
+//   //     paid: paidInstallments,
+//   //     partial: partialInstallments,
+//   //     pending: pendingInstallments,
+//   //     overdue: overdueInstallments
+//   //   }
+//   // });
+// return successResponse(res, 'Fee statistics retrieved successfully', {
+//   academicYear,
+//   totalStudents: students.length,
+//   totalExpected,
+//   totalCollected,
+//   totalPending,
+//   collectionPercentage: Math.min(100, collectionPercentage),
+//   paymentStatus: {
+//     paid: completed,
+//     unpaid: pending,
+//     partial,
+//     overdue
+//   }
+// });
+
+
+// });
+
+// export const getFeeStatistics = asyncHandler(async (req, res) => {
+//   const { academicYear } = req.query;
+
+//   if (!academicYear) {
+//     throw new ValidationError('Academic year is required');
+//   }
+
+//   // 1️⃣ Get all active students
+//   const students = await Student.find({
+//     schoolId: req.schoolId,
+//     academicYear,
+//     status: { $in: ['ENROLLED', 'ACTIVE'] }
+//   }).select('_id').lean();
+
+//   const totalStudents = students.length;
+
+//   // 2️⃣ Get all fee payments
+//   const feePayments = await FeePayment.find({
+//     schoolId: req.schoolId,
+//     academicYear
+//   }).lean();
+
+//   // ===============================
+//   // STUDENT PAYMENT STATUS
+//   // ===============================
+//   const paidStudentIds = new Set(
+//     feePayments
+//       .filter(f => f.status === 'PAID')
+//       .map(f => String(f.student))
+//   );
+
+//   const unpaidStudentIds = new Set();
+//   students.forEach(s => {
+//     if (!paidStudentIds.has(String(s._id))) {
+//       unpaidStudentIds.add(String(s._id));
+//     }
+//   });
+
+//   const paid = paidStudentIds.size;
+//   const unpaid = unpaidStudentIds.size;
+//   const partial = feePayments.filter(f => f.status === 'PARTIALLY_PAID').length;
+//   const overdue = feePayments.filter(f => f.status === 'OVERDUE').length;
+
+//   // ===============================
+//   // AMOUNT CALCULATIONS
+//   // ===============================
+//   let totalExpected = 0;
+//   let totalCollected = 0;
+//   let totalPending = 0;
+
+//   feePayments.forEach(fee => {
+//     totalExpected += Number(fee.totalDue ?? fee.totalAmount ?? 0);
+//     totalCollected += Number(fee.totalPaid ?? fee.paidAmount ?? 0);
+//     totalPending += Number(fee.balancePending ?? 0);
+//   });
+
+//   // ===============================
+//   // COLLECTION %
+//   // ===============================
+//   const collectionPercentage =
+//     totalExpected > 0
+//       ? Math.round((totalCollected / totalExpected) * 100)
+//       : 0;
+
+//   // ===============================
+//   // FINAL RESPONSE
+//   // ===============================
+//   return successResponse(res, 'Fee statistics retrieved successfully', {
+//     academicYear,
+//     totalStudents,
+//     totalExpected,
+//     totalCollected,
+//     totalPending,
+//     collectionPercentage: Math.min(100, collectionPercentage),
+//     paymentStatus: {
+//       paid,
+//       unpaid,
+//       partial,
+//       overdue
+//     }
+//   });
+// });
+
+// export const getFeeStatistics = asyncHandler(async (req, res) => {
+//   const { academicYear } = req.query;
+
+//   if (!academicYear) {
+//     throw new ValidationError('Academic year is required');
+//   }
+
+//   /* =======================
+//      1️⃣ GET ALL ACTIVE STUDENTS
+//      ======================= */
+//   const students = await Student.find({
+//     schoolId: req.schoolId,
+//     academicYear,
+//     status: { $in: ['ENROLLED', 'ACTIVE'] }
+//   }).select('_id').lean();
+
+//   const totalStudents = students.length;
+
+//   /* =======================
+//      2️⃣ GET ALL FEE PAYMENTS
+//      ======================= */
+//   const feePayments = await FeePayment.find({
+//     schoolId: req.schoolId,
+//     academicYear
+//   }).lean();
+
+//   /* =======================
+//      3️⃣ PAID STUDENTS (ONLY PAID)
+//      ======================= */
+//   const paidStudentIds = new Set(
+//     feePayments
+//       .filter(fee => fee.status === 'PAID')
+//       .map(fee => String(fee.student))
+//   );
+
+//   const paid = paidStudentIds.size;
+
+//   /* =======================
+//      4️⃣ UNPAID STUDENTS
+//      (partial + pending + overdue + no record)
+//      ======================= */
+//   const unpaidStudentIds = new Set();
+
+//   students.forEach(student => {
+//     if (!paidStudentIds.has(String(student._id))) {
+//       unpaidStudentIds.add(String(student._id));
+//     }
+//   });
+
+//   const unpaid = unpaidStudentIds.size;
+
+//   /* =======================
+//      5️⃣ OPTIONAL BREAKDOWN
+//      ======================= */
+//   const partial = feePayments.filter(f => f.status === 'PARTIALLY_PAID').length;
+//   const pending = feePayments.filter(f => f.status === 'PENDING').length;
+//   const overdue = feePayments.filter(f => f.status === 'OVERDUE').length;
+
+//   /* =======================
+//      6️⃣ AMOUNT CALCULATION
+//      ======================= */
+//   let totalExpected = 0;
+//   let totalCollected = 0;
+//   let totalPending = 0;
+
+//   feePayments.forEach(fee => {
+//     totalExpected += Number(fee.totalDue ?? fee.totalAmount ?? 0);
+//     totalCollected += Number(fee.totalPaid ?? fee.paidAmount ?? 0);
+//     totalPending += Number(fee.balancePending ?? 0);
+//   });
+
+//   /* =======================
+//      7️⃣ COLLECTION %
+//      ======================= */
+//   const collectionPercentage =
+//     totalExpected > 0
+//       ? Math.round((totalCollected / totalExpected) * 100)
+//       : 0;
+
+//   /* =======================
+//      8️⃣ FINAL RESPONSE
+//      ======================= */
+//   return successResponse(res, 'Fee statistics retrieved successfully', {
+//     academicYear,
+//     totalStudents,
+//     totalExpected,
+//     totalCollected,
+//     totalPending,
+//     collectionPercentage: Math.min(collectionPercentage, 100),
+
+//     paymentStatus: {
+//       paid,        // ✅ ONLY PAID
+//       unpaid,      // ✅ partial + pending + overdue + no record
+//       partial,     // optional (for UI breakdown)
+//       pending,     // optional
+//       overdue      // optional
+//     }
+//   });
+// });
+
 export const getFeeStatistics = asyncHandler(async (req, res) => {
   const { academicYear } = req.query;
 
   if (!academicYear) {
-    return successResponse(res, 'Statistics calculated', {
-      academicYear: getCurrentAcademicYear(),
-      totalStudents: 0,
-      totalExpected: 0,
-      totalCollected: 0,
-      totalPending: 0,
-      collectionPercentage: 0,
-      paymentStatus: { completed: 0, partial: 0, pending: 0, overdue: 0 },
-      installmentStats: { total: 0, paid: 0, partial: 0, pending: 0, overdue: 0 }
-    });
+    throw new ValidationError('Academic year is required');
   }
 
-  // 1) Students count
-  const totalStudents = await Student.countDocuments({
-    schoolId: req.schoolId,
-    academicYear,
-    status: { $in: ['ENROLLED', 'ACTIVE'] }
-  });
-
-  // 2) Saare feePayments simple find se lao
+  // 1️⃣ All fee payments of year
   const feePayments = await FeePayment.find({
     schoolId: req.schoolId,
     academicYear
   }).lean();
 
+  // 2️⃣ Student sets
+  const allStudentIds = new Set(
+    feePayments.map(fp => String(fp.student))
+  );
+
+  const paidStudentIds = new Set(
+    feePayments
+      .filter(fp => fp.status === 'PAID')
+      .map(fp => String(fp.student))
+  );
+
+  // 3️⃣ Counts
+  const totalStudents = allStudentIds.size;
+  const paid = paidStudentIds.size;
+  const unpaid = totalStudents - paid;
+
+  const partial = feePayments.filter(f => f.status === 'PARTIALLY_PAID').length;
+  const pending = feePayments.filter(f => f.status === 'PENDING').length;
+  const overdue = feePayments.filter(f => f.status === 'OVERDUE').length;
+
+  // 4️⃣ Amount calculations
   let totalExpected = 0;
   let totalCollected = 0;
   let totalPending = 0;
 
-  let completed = 0;
-  let partial = 0;
-  let pending = 0;
-  let overdue = 0;
-
-  let totalInstallments = 0;
-  let paidInstallments = 0;
-  let partialInstallments = 0;
-  let pendingInstallments = 0;
-  let overdueInstallments = 0;
-
-  for (const fee of feePayments) {
-    // yahan dono naming variants support kar rahe hain
-    totalExpected += fee.totalDue ?? fee.totalAmount ?? 0;
-    totalCollected += fee.totalPaid ?? fee.paidAmount ?? 0;
-    totalPending += fee.balancePending ?? 0;
-
-    if (fee.status === 'PAID') completed++;
-    else if (fee.status === 'PARTIALLY_PAID') partial++;
-    else if (fee.status === 'PENDING') pending++;
-    else if (fee.status === 'OVERDUE') overdue++;
-
-    const installments = fee.installments || [];
-    totalInstallments += installments.length;
-
-    for (const inst of installments) {
-      if (inst.status === 'PAID') paidInstallments++;
-      else if (inst.status === 'PARTIAL') partialInstallments++;
-      else if (inst.status === 'PENDING') pendingInstallments++;
-      else if (inst.status === 'OVERDUE') overdueInstallments++;
-    }
-  }
+  feePayments.forEach(fee => {
+    totalExpected += Number(fee.totalDue ?? fee.totalAmount ?? 0);
+    totalCollected += Number(fee.totalPaid ?? fee.paidAmount ?? 0);
+    totalPending += Number(fee.balancePending ?? 0);
+  });
 
   const collectionPercentage =
-    totalStudents > 0 && totalExpected > 0
+    totalExpected > 0
       ? Math.round((totalCollected / totalExpected) * 100)
       : 0;
 
+  // 5️⃣ Response
   return successResponse(res, 'Fee statistics retrieved successfully', {
     academicYear,
     totalStudents,
     totalExpected,
     totalCollected,
     totalPending,
-    collectionPercentage: Math.max(0, Math.min(100, collectionPercentage)),
+    collectionPercentage: Math.min(collectionPercentage, 100),
+
     paymentStatus: {
-      completed,
+      paid,        // ✅ sirf PAID
+      unpaid,      // ✅ partial + pending + overdue
       partial,
       pending,
       overdue
-    },
-    installmentStats: {
-      total: totalInstallments,
-      paid: paidInstallments,
-      partial: partialInstallments,
-      pending: pendingInstallments,
-      overdue: overdueInstallments
     }
   });
 });
+
 
 
 export const getFeeDefaulters = asyncHandler(async (req, res) => {

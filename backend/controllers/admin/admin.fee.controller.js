@@ -300,6 +300,120 @@ export const getClassFeeStructures = asyncHandler(async (req, res) => {
   return successResponse(res, 'Class fee structures retrieved successfully', { classes });
 });
 
+// export const setClassFeeStructure = asyncHandler(async (req, res) => {
+//   const {
+//     className,
+//     academicYear,
+//     feeStructure,
+//     paymentSchedule,
+//     dueDate,
+//     lateFeeAmount,
+//     lateFeeApplicableAfter
+//   } = req.body;
+
+//   if (!className || !academicYear) {
+//     throw new ValidationError('Class name and academic year are required');
+//   }
+
+//   if (!feeStructure || !Array.isArray(feeStructure) || feeStructure.length === 0) {
+//     throw new ValidationError('Fee structure array is required');
+//   }
+
+//   feeStructure.forEach((fee, idx) => {
+//     if (!fee.headName) {
+//       throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
+//     }
+//     if (!fee.amount || fee.amount < 0) {
+//       throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
+//     }
+//     if (!fee.frequency) {
+//       throw new ValidationError(`Frequency is required at row ${idx + 1}`);
+//     }
+//   });
+
+//   const classData = await Class.findOne({ className, academicYear, schoolId: req.schoolId });
+//   if (!classData) throw new NotFoundError('Class');
+
+//   const totalAnnualFee = feeStructure.reduce((sum, fee) => {
+//     let annualAmount = fee.amount || 0;
+//     if (fee.frequency === 'MONTHLY') annualAmount *= 12;
+//     else if (fee.frequency === 'QUARTERLY') annualAmount *= 4;
+//     else if (fee.frequency === 'HALF_YEARLY') annualAmount *= 2;
+//     return sum + annualAmount;
+//   }, 0);
+
+//   const formattedFeeStructure = feeStructure.map(fee => ({
+//     head: fee.head || null,
+//     headName: fee.headName,
+//     amount: fee.amount || 0,
+//     frequency: fee.frequency || 'YEARLY',
+//     dueMonth: fee.dueMonth || null,
+//     lateFee: fee.lateFee || 0
+//   }));
+
+//   classData.feeStructure = formattedFeeStructure;
+//   classData.feeSettings = {
+//     paymentSchedule: paymentSchedule || 'YEARLY',
+//     dueDate: dueDate || null,
+//     lateFeeAmount: Number(lateFeeAmount || 0),
+//     lateFeeApplicableAfter: lateFeeApplicableAfter || null,
+//     totalAnnualFee
+//   };
+
+//   await classData.save();
+
+//   // Auto-assign fee structure to all students in this class
+//   const students = await Student.find({
+//     schoolId: req.schoolId,
+//     class: classData._id,
+//     academicYear
+//   });
+
+//   for (const student of students) {
+//     const existingFee = await FeePayment.findOne({
+//       student: student._id,
+//       academicYear,
+//       schoolId: req.schoolId
+//     });
+//     if (existingFee) continue; // Skip if already exists
+
+//     const installments = generateInstallments(formattedFeeStructure, academicYear);
+//     const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+
+//     await FeePayment.create({
+//       schoolId: req.schoolId,
+//       student: student._id,
+//       class: classData._id,
+//       academicYear,
+//       studentName: student.name,
+//       studentID: student.studentID,
+//       className: classData.className,
+//       section: student.section,
+//       installments,
+//       feeStructure: formattedFeeStructure,
+//       totalAmount: grandTotal,
+//       totalDue: grandTotal,
+//       paidAmount: 0,
+//       pendingAmount: grandTotal,
+//       balancePending: grandTotal,
+//       status: 'PENDING'
+//     });
+//   }
+
+//   return successResponse(res, 'Fee structure set successfully for class and assigned to all students', {
+//     className: classData.className,
+//     academicYear: classData.academicYear,
+//     feeStructure: formattedFeeStructure,
+//     totalAnnualFee,
+//     paymentSchedule,
+//     dueDate
+//   });
+// });
+
+// ==========================================
+// 3. SMART FEE ASSIGNMENT WITH INSTALLMENTS
+// ==========================================
+
 export const setClassFeeStructure = asyncHandler(async (req, res) => {
   const {
     className,
@@ -311,6 +425,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     lateFeeApplicableAfter
   } = req.body;
 
+  // ===== Validation =====
   if (!className || !academicYear) {
     throw new ValidationError('Class name and academic year are required');
   }
@@ -320,20 +435,16 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   }
 
   feeStructure.forEach((fee, idx) => {
-    if (!fee.headName) {
-      throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
-    }
-    if (!fee.amount || fee.amount < 0) {
-      throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
-    }
-    if (!fee.frequency) {
-      throw new ValidationError(`Frequency is required at row ${idx + 1}`);
-    }
+    if (!fee.headName) throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
+    if (!fee.amount || fee.amount < 0) throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
+    if (!fee.frequency) throw new ValidationError(`Frequency is required at row ${idx + 1}`);
   });
 
+  // ===== Get class =====
   const classData = await Class.findOne({ className, academicYear, schoolId: req.schoolId });
   if (!classData) throw new NotFoundError('Class');
 
+  // ===== Calculate total annual fee =====
   const totalAnnualFee = feeStructure.reduce((sum, fee) => {
     let annualAmount = fee.amount || 0;
     if (fee.frequency === 'MONTHLY') annualAmount *= 12;
@@ -342,6 +453,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     return sum + annualAmount;
   }, 0);
 
+  // ===== Format fee structure =====
   const formattedFeeStructure = feeStructure.map(fee => ({
     head: fee.head || null,
     headName: fee.headName,
@@ -351,6 +463,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     lateFee: fee.lateFee || 0
   }));
 
+  // ===== Update class fee settings =====
   classData.feeStructure = formattedFeeStructure;
   classData.feeSettings = {
     paymentSchedule: paymentSchedule || 'YEARLY',
@@ -362,7 +475,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
 
   await classData.save();
 
-  // Auto-assign fee structure to all students in this class
+  // ===== Assign fee to students =====
   const students = await Student.find({
     schoolId: req.schoolId,
     class: classData._id,
@@ -370,16 +483,36 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   });
 
   for (const student of students) {
+    // Generate installments & total for all students
+    const installments = generateInstallments(formattedFeeStructure, academicYear);
+    const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+
     const existingFee = await FeePayment.findOne({
       student: student._id,
       academicYear,
       schoolId: req.schoolId
     });
-    if (existingFee) continue; // Skip if already exists
 
-    const installments = generateInstallments(formattedFeeStructure, academicYear);
-    const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+    if (existingFee) {
+      const alreadyPaid = existingFee.paidAmount || existingFee.totalPaid || 0;
+      const newPending = Math.max(grandTotal - alreadyPaid, 0);
 
+      existingFee.feeStructure = formattedFeeStructure;
+      existingFee.installments = installments;
+      existingFee.totalAmount = grandTotal;
+      existingFee.totalDue = grandTotal;
+      existingFee.pendingAmount = newPending;
+      existingFee.balancePending = newPending;
+
+      if (newPending === 0) existingFee.status = 'PAID';
+      else if (alreadyPaid > 0) existingFee.status = 'PARTIAL';
+      else existingFee.status = 'PENDING';
+
+      await existingFee.save();
+      continue;
+    }
+
+    // If no existing fee, create new fee record
     await FeePayment.create({
       schoolId: req.schoolId,
       student: student._id,
@@ -410,9 +543,6 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   });
 });
 
-// ==========================================
-// 3. SMART FEE ASSIGNMENT WITH INSTALLMENTS
-// ==========================================
 
 export const assignFeeStructureToStudent = asyncHandler(async (req, res) => {
   const { studentId, academicYear } = req.body;

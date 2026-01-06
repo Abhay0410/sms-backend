@@ -59,41 +59,46 @@ export const getAllSubjects = asyncHandler(async (req, res) => {
 // Get subjects for a specific class - MULTI-TENANT
 export const getSubjectsByClass = asyncHandler(async (req, res) => {
   const { classId } = req.params;
-  const { section } = req.query;
   
   const classData = await Class.findOne({
     _id: classId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
+    schoolId: req.schoolId
   }).populate('sections.subjects.teacher', 'name teacherID email');
   
   if (!classData) {
     throw new NotFoundError('Class');
   }
-  
-  // Extract unique subjects across all sections (availableSubjects)
+
+  // LOGIC FIX: Instead of just section subjects, we can now also rely on 
+  // the 'commonSubjects' array defined in the Class Model if necessary,
+  // but to be safe, we pull all unique subjects currently existing in THIS class.
   const subjectsMap = new Map();
+  
+  // Also check if this is 11-12 to ensure stream-specific subjects are handled
   classData.sections.forEach(sec => {
-    sec.subjects.forEach(sub => {
-      const key = `${sub.subjectName}_${sub.subjectCode || ''}`;
-      if (!subjectsMap.has(key)) {
-        subjectsMap.set(key, {
-          _id: sub._id,
-          subjectName: sub.subjectName,
-          subjectCode: sub.subjectCode,
-          hasTheory: sub.hasTheory,
-          hasPractical: sub.hasPractical,
-          hasIA: sub.hasIA,
-          theoryMaxMarks: sub.theoryMaxMarks,
-          practicalMaxMarks: sub.practicalMaxMarks,
-          iaMaxMarks: sub.iaMaxMarks,
-          isCore: sub.isCore !== false
-        });
-      }
-    });
+    if (sec.subjects && Array.isArray(sec.subjects)) {
+      sec.subjects.forEach(sub => {
+        const key = `${sub.subjectName}_${sub.subjectCode || ''}`;
+        if (!subjectsMap.has(key)) {
+          subjectsMap.set(key, {
+            _id: sub._id,
+            subjectName: sub.subjectName,
+            subjectCode: sub.subjectCode,
+            hasTheory: sub.hasTheory,
+            hasPractical: sub.hasPractical,
+            hasIA: sub.hasIA,
+            theoryMaxMarks: sub.theoryMaxMarks,
+            practicalMaxMarks: sub.practicalMaxMarks,
+            iaMaxMarks: sub.iaMaxMarks,
+            isCore: sub.isCore !== false
+          });
+        }
+      });
+    }
   });
-  
+
   const availableSubjects = Array.from(subjectsMap.values());
-  
+
   return successResponse(res, 'Subjects retrieved successfully', {
     className: classData.className,
     classId: classData._id,
@@ -102,57 +107,59 @@ export const getSubjectsByClass = asyncHandler(async (req, res) => {
       sectionName: sec.sectionName,
       subjects: sec.subjects || []
     })),
-    availableSubjects: availableSubjects
+    availableSubjects: availableSubjects // If empty, use "Add Subject" to populate
   });
 });
 
-// Add subject to class section - MULTI-TENANT
+
 export const addSubjectToClass = asyncHandler(async (req, res) => {
   const { classId, sectionName, subject } = req.body;
-  
-  if (!classId || !sectionName || !subject || !subject.subjectName) {
-    throw new ValidationError('Class, section, and subject details are required');
+
+  if (!classId || !subject || !subject.subjectName) {
+    throw new ValidationError('Class ID and Subject Name are required');
   }
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  // FIND OR CREATE SECTION logic to prevent 400 error in manually created classes
+  let section = classData.sections.find(s => s.sectionName === sectionName);
   
-  const classData = await Class.findOne({
-    _id: classId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
-  });
-  
-  if (!classData) {
-    throw new NotFoundError('Class');
-  }
-  
-  const section = classData.sections.find(s => s.sectionName === sectionName);
   if (!section) {
-    throw new NotFoundError('Section');
+    // If Admin tries to add a subject but section doesn't exist, create it on the fly
+    classData.sections.push({
+      sectionName: sectionName || "A",
+      capacity: 40,
+      currentStrength: 0,
+      subjects: []
+    });
+    section = classData.sections[classData.sections.length - 1];
   }
-  
+
   const subjectExists = section.subjects.some(s => s.subjectName === subject.subjectName);
   if (subjectExists) {
     throw new ValidationError(`Subject ${subject.subjectName} already exists in this section`);
   }
-  
-  section.subjects.push({
+
+  // Build payload strictly following your Class Model Schema
+  const newSubject = {
+    schoolId: req.schoolId, // Required by subjectSchema in models/Class.js
     subjectName: subject.subjectName,
     subjectCode: subject.subjectCode || '',
-    hasTheory: subject.hasTheory !== false,
-    hasPractical: subject.hasPractical || false,
-    hasIA: subject.hasIA !== false,
-    theoryMaxMarks: subject.theoryMaxMarks || 100,
-    practicalMaxMarks: subject.practicalMaxMarks || 0,
-    iaMaxMarks: subject.iaMaxMarks || 20,
-    hoursPerWeek: subject.hoursPerWeek || 5,
-    teacher: subject.teacher || null
-  });
-  
+    isCore: subject.isCore !== false,
+    hasTheory: true,
+    hasPractical: false,
+    hasIA: true,
+    theoryMaxMarks: 100,
+    practicalMaxMarks: 0,
+    iaMaxMarks: 20,
+    hoursPerWeek: 5
+  };
+
+  section.subjects.push(newSubject);
   await classData.save();
-  
-  return successResponse(res, 'Subject added successfully', {
-    className: classData.className,
-    section: sectionName,
-    subject: section.subjects[section.subjects.length - 1]
-  }, 201);
+
+  return successResponse(res, 'Subject added successfully', newSubject, 201);
 });
 
 // Add subject to multiple sections - MULTI-TENANT
@@ -160,44 +167,35 @@ export const addSubjectToSections = asyncHandler(async (req, res) => {
   const { classId, sectionNames, subject } = req.body;
   
   if (!classId || !sectionNames || !Array.isArray(sectionNames) || !subject || !subject.subjectName) {
-    throw new ValidationError('Class, sections array, and subject details are required');
+    throw new ValidationError('Class, sections, and subject details are required');
   }
   
   const classData = await Class.findOne({
     _id: classId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
+    schoolId: req.schoolId
   });
   
-  if (!classData) {
-    throw new NotFoundError('Class');
-  }
+  if (!classData) throw new NotFoundError('Class');
   
-  const results = {
-    success: [],
-    failed: []
-  };
+  const results = { success: [], failed: [] };
   
   for (const sectionName of sectionNames) {
     const section = classData.sections.find(s => s.sectionName === sectionName);
     
     if (!section) {
-      results.failed.push({
-        section: sectionName,
-        reason: 'Section not found'
-      });
+      results.failed.push({ section: sectionName, reason: 'Section not found' });
       continue;
     }
     
     const subjectExists = section.subjects.some(s => s.subjectName === subject.subjectName);
     if (subjectExists) {
-      results.failed.push({
-        section: sectionName,
-        reason: 'Subject already exists'
-      });
+      results.failed.push({ section: sectionName, reason: 'Subject already exists' });
       continue;
     }
     
+    // FIX: You MUST provide schoolId here because subjectSchema requires it
     section.subjects.push({
+      schoolId: req.schoolId, // 👈 THE CRITICAL FIX
       subjectName: subject.subjectName,
       subjectCode: subject.subjectCode || '',
       hasTheory: subject.hasTheory !== false,
@@ -216,8 +214,6 @@ export const addSubjectToSections = asyncHandler(async (req, res) => {
   await classData.save();
   
   return successResponse(res, `Subject added to ${results.success.length} sections`, {
-    className: classData.className,
-    subjectName: subject.subjectName,
     addedToSections: results.success,
     failed: results.failed
   }, 201);

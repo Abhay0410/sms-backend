@@ -46,6 +46,8 @@ import parentFeeRoutes from "./routes/parent/parent.fee.routes.js";
 import parentAnnouncementRoutes from "./routes/parent/parent.announcement.routes.js";
 import parentTimetableRoutes from "./routes/parent/parent.timetable.routes.js";
 import parentMessageRoutes from "./routes/parent/parent.message.routes.js";
+import adminHRRoutes from "./routes/admin/admin.hr.routes.js";
+import teacherHRRoutes from "./routes/teacher/teacher.hr.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -168,6 +170,10 @@ app.use("/api/student/fees", studentFeeRoutes);
 app.use("/api/student/results", studentResultRoutes);
 app.use("/api/student/announcements", studentAnnouncementRoutes);
 app.use("/api/student/timetable", studentTimetableRoutes);
+// Register HR Modules
+app.use("/api/admin/hr", adminHRRoutes);
+app.use("/api/teacher/hr", teacherHRRoutes);
+
 app.use("/api/student/messages", studentMessageRoutes);
 app.use("/api/parent/attendance", parentAttendanceRoutes);
 app.use("/api/parent/results", parentResultRoutes);

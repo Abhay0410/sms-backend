@@ -300,6 +300,122 @@ export const getClassFeeStructures = asyncHandler(async (req, res) => {
   return successResponse(res, 'Class fee structures retrieved successfully', { classes });
 });
 
+// export const setClassFeeStructure = asyncHandler(async (req, res) => {
+//   const {
+//     className,
+//     academicYear,
+//     feeStructure,
+//     paymentSchedule,
+//     dueDate,
+//     lateFeeAmount,
+//     lateFeeApplicableAfter
+//   } = req.body;
+
+//   if (!className || !academicYear) {
+//     throw new ValidationError('Class name and academic year are required');
+//   }
+
+//   if (!feeStructure || !Array.isArray(feeStructure) || feeStructure.length === 0) {
+//     throw new ValidationError('Fee structure array is required');
+//   }
+
+//   feeStructure.forEach((fee, idx) => {
+//     if (!fee.headName) {
+//       throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
+//     }
+//     if (!fee.amount || fee.amount < 0) {
+//       throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
+//     }
+//     if (!fee.frequency) {
+//       throw new ValidationError(`Frequency is required at row ${idx + 1}`);
+//     }
+//   });
+
+//   const classData = await Class.findOne({ className, academicYear, schoolId: req.schoolId });
+//   if (!classData) throw new NotFoundError('Class');
+
+//   const totalAnnualFee = feeStructure.reduce((sum, fee) => {
+//     let annualAmount = fee.amount || 0;
+//     if (fee.frequency === 'MONTHLY') annualAmount *= 12;
+//     else if (fee.frequency === 'QUARTERLY') annualAmount *= 4;
+//     else if (fee.frequency === 'HALF_YEARLY') annualAmount *= 2;
+//     return sum + annualAmount;
+//   }, 0);
+
+//   const formattedFeeStructure = feeStructure.map(fee => ({
+//     head: fee.head || null,
+//     headName: fee.headName,
+//     amount: fee.amount || 0,
+//     frequency: fee.frequency || 'YEARLY',
+//     dueMonth: fee.dueMonth || null,
+//     lateFee: fee.lateFee || 0
+//   }));
+
+//   classData.feeStructure = formattedFeeStructure;
+//   classData.feeSettings = {
+//     paymentSchedule: paymentSchedule || 'YEARLY',
+//     dueDate: dueDate || null,
+//     lateFeeAmount: Number(lateFeeAmount || 0),
+//     lateFeeApplicableAfter: lateFeeApplicableAfter || null,
+//     totalAnnualFee
+//   };
+
+//   await classData.save();
+
+//   // Auto-assign fee structure to all students in this class
+//   const students = await Student.find({
+//     schoolId: req.schoolId,
+//     class: classData._id,
+//     academicYear
+//   });
+
+//   for (const student of students) {
+//     const existingFee = await FeePayment.findOne({
+//       student: student._id,
+//       academicYear,
+//       schoolId: req.schoolId
+//     });
+//     if (existingFee) continue; // Skip if already exists
+
+//     const installments = generateInstallments(formattedFeeStructure, academicYear);
+//     const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+
+//     await FeePayment.create({
+//       schoolId: req.schoolId,
+//       student: student._id,
+//       class: classData._id,
+//       academicYear,
+//       studentName: student.name,
+//       studentID: student.studentID,
+//       className: classData.className,
+//       section: student.section,
+//       installments,
+//       feeStructure: formattedFeeStructure,
+//       totalAmount: grandTotal,
+//       totalDue: grandTotal,
+//       paidAmount: 0,
+//       pendingAmount: grandTotal,
+//       balancePending: grandTotal,
+//       status: 'PENDING'
+//     });
+//   }
+
+//   return successResponse(res, 'Fee structure set successfully for class and assigned to all students', {
+//     className: classData.className,
+//     academicYear: classData.academicYear,
+//     feeStructure: formattedFeeStructure,
+//     totalAnnualFee,
+//     paymentSchedule,
+//     dueDate
+//   });
+// });
+
+// ==========================================
+// 3. SMART FEE ASSIGNMENT WITH INSTALLMENTS
+// ==========================================
+
+
+
 export const setClassFeeStructure = asyncHandler(async (req, res) => {
   const {
     className,
@@ -311,6 +427,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     lateFeeApplicableAfter
   } = req.body;
 
+  // ===== Validation =====
   if (!className || !academicYear) {
     throw new ValidationError('Class name and academic year are required');
   }
@@ -320,20 +437,16 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   }
 
   feeStructure.forEach((fee, idx) => {
-    if (!fee.headName) {
-      throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
-    }
-    if (!fee.amount || fee.amount < 0) {
-      throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
-    }
-    if (!fee.frequency) {
-      throw new ValidationError(`Frequency is required at row ${idx + 1}`);
-    }
+    if (!fee.headName) throw new ValidationError(`Fee headName is required at row ${idx + 1}`);
+    if (!fee.amount || fee.amount < 0) throw new ValidationError(`Valid amount is required at row ${idx + 1}`);
+    if (!fee.frequency) throw new ValidationError(`Frequency is required at row ${idx + 1}`);
   });
 
+  // ===== Get class =====
   const classData = await Class.findOne({ className, academicYear, schoolId: req.schoolId });
   if (!classData) throw new NotFoundError('Class');
 
+  // ===== Calculate total annual fee =====
   const totalAnnualFee = feeStructure.reduce((sum, fee) => {
     let annualAmount = fee.amount || 0;
     if (fee.frequency === 'MONTHLY') annualAmount *= 12;
@@ -342,6 +455,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     return sum + annualAmount;
   }, 0);
 
+  // ===== Format fee structure =====
   const formattedFeeStructure = feeStructure.map(fee => ({
     head: fee.head || null,
     headName: fee.headName,
@@ -351,6 +465,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
     lateFee: fee.lateFee || 0
   }));
 
+  // ===== Update class fee settings =====
   classData.feeStructure = formattedFeeStructure;
   classData.feeSettings = {
     paymentSchedule: paymentSchedule || 'YEARLY',
@@ -362,7 +477,7 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
 
   await classData.save();
 
-  // Auto-assign fee structure to all students in this class
+  // ===== Assign fee to students =====
   const students = await Student.find({
     schoolId: req.schoolId,
     class: classData._id,
@@ -370,16 +485,43 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   });
 
   for (const student of students) {
+    // Generate installments & total for all studentsf
+    const installments = generateInstallments(formattedFeeStructure, academicYear);
+
+    // 🔥 MONTHLY → YEARLY TOTAL AUTO CALCULATION
+const grandTotal = installments.reduce(
+  (sum, inst) => sum + Number(inst.amount || 0),
+  0
+);
+
+    // const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+
     const existingFee = await FeePayment.findOne({
       student: student._id,
       academicYear,
       schoolId: req.schoolId
     });
-    if (existingFee) continue; // Skip if already exists
 
-    const installments = generateInstallments(formattedFeeStructure, academicYear);
-    const grandTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+    if (existingFee) {
+      const alreadyPaid = existingFee.paidAmount || existingFee.totalPaid || 0;
+      const newPending = Math.max(grandTotal - alreadyPaid, 0);
 
+      existingFee.feeStructure = formattedFeeStructure;
+      existingFee.installments = installments;
+      existingFee.totalAmount = grandTotal;
+      existingFee.totalDue = grandTotal;
+      existingFee.pendingAmount = newPending;
+      existingFee.balancePending = newPending;
+
+      if (newPending === 0) existingFee.status = 'PAID';
+      else if (alreadyPaid > 0) existingFee.status = 'PARTIAL';
+      else existingFee.status = 'PENDING';
+
+      await existingFee.save();
+      continue;
+    }
+
+    // If no existing fee, create new fee record
     await FeePayment.create({
       schoolId: req.schoolId,
       student: student._id,
@@ -410,9 +552,6 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   });
 });
 
-// ==========================================
-// 3. SMART FEE ASSIGNMENT WITH INSTALLMENTS
-// ==========================================
 
 export const assignFeeStructureToStudent = asyncHandler(async (req, res) => {
   const { studentId, academicYear } = req.body;
@@ -599,220 +738,360 @@ export const createBulkFeeStructureFromClass = asyncHandler(async (req, res) => 
 // 4. SMART PAYMENT RECORDING (Auto-Allocation)
 // ==========================================
 
+
 export const recordPayment = asyncHandler(async (req, res) => {
-  const { 
-    studentId, 
-    feePaymentId, 
-    amountPaid, 
-    paymentMethod, 
-    transactionId, 
-    chequeNumber, 
-    bankName, 
-    upiId, 
-    paymentDate, 
-    remarks, 
-    academicYear 
+  const {
+    feePaymentId,
+    installmentId,
+    amountPaid,
+    paymentMode,
+    receiptNumber,
+    paymentDate,
   } = req.body;
 
-  if (!studentId || !amountPaid || !paymentMethod || !paymentDate || !academicYear) {
-    throw new ValidationError('Required fields missing');
+  if (!feePaymentId) {
+    throw new Error("feePaymentId is required");
   }
 
-  const amount = parseFloat(amountPaid);
-  if (isNaN(amount) || amount <= 0) {
-    throw new ValidationError('Amount must be a valid number greater than 0');
+  const fee = await FeePayment.findById(feePaymentId);
+  if (!fee) throw new Error("Fee record not found");
+
+  const paidAmt = Number(amountPaid);
+  if (isNaN(paidAmt) || paidAmt <= 0) {
+    throw new Error("Invalid amountPaid");
   }
 
-  let paymentDateObj = new Date(paymentDate);
-  if (isNaN(paymentDateObj.getTime())) {
-    paymentDateObj = new Date(paymentDate + 'T00:00:00.000Z');
-  }
-  if (isNaN(paymentDateObj.getTime())) {
-    throw new ValidationError('Invalid paymentDate format, expected YYYY-MM-DD');
-  }
+  let installment;
 
-  let feePayment;
-  if (feePaymentId) {
-    feePayment = await FeePayment.findOne({ _id: feePaymentId, schoolId: req.schoolId });
-  } else {
-    feePayment = await FeePayment.findOne({ student: studentId, academicYear, schoolId: req.schoolId });
-  }
-
-  if (!feePayment) {
-    const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId }).lean();
-    if (!student) throw new NotFoundError('Student not found');
-    const classData = await Class.findOne({ _id: student.class, academicYear, schoolId: req.schoolId }).populate('feeStructure.head').lean();
-    if (!classData?.feeStructure || !classData.feeStructure.length) {
-      throw new ValidationError('Fee structure not set for this student\'s class');
-    }
-
-    let installments = [];
-    let grandTotal = 0;
-
-    classData.feeStructure.forEach(rule => {
-      if (rule.frequency === 'MONTHLY') {
-        const months = ['APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'JAN', 'FEB', 'MAR'];
-        months.forEach((month, index) => {
-          const year = academicYear.split('-')[0];
-          const monthNum = (index + 3) % 12 + 1;
-          const dueDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-10`);
-          installments.push({
-            head: rule.head._id,
-            headName: rule.headName,
-            name: `${month} - ${rule.headName}`,
-            amount: rule.amount,
-            dueDate: dueDate,
-            paidAmount: 0,
-            status: 'PENDING'
-          });
-          grandTotal += rule.amount;
-        });
-      } else if (rule.frequency === 'QUARTERLY') {
-        const quarters = [
-          { name: 'Q1 (APR-JUN)', dueDate: new Date(`${academicYear.split('-')[0]}-04-10`) },
-          { name: 'Q2 (JUL-SEP)', dueDate: new Date(`${academicYear.split('-')[0]}-07-10`) },
-          { name: 'Q3 (OCT-DEC)', dueDate: new Date(`${academicYear.split('-')[0]}-10-10`) },
-          { name: 'Q4 (JAN-MAR)', dueDate: new Date(`${Number(academicYear.split('-')[0]) + 1}-01-10`) }
-        ];
-        quarters.forEach(quarter => {
-          installments.push({
-            head: rule.head._id,
-            headName: rule.headName,
-            name: `${quarter.name} - ${rule.headName}`,
-            amount: rule.amount * 3,
-            dueDate: quarter.dueDate,
-            paidAmount: 0,
-            status: 'PENDING'
-          });
-          grandTotal += rule.amount * 3;
-        });
-      } else if (rule.frequency === 'YEARLY' || rule.frequency === 'ONE_TIME') {
-        const dueDate = new Date(`${academicYear.split('-')[0]}-04-10`);
-        installments.push({
-          head: rule.head._id,
-          headName: rule.headName,
-          name: rule.headName,
-          amount: rule.amount,
-          dueDate: dueDate,
-          paidAmount: 0,
-          status: 'PENDING'
-        });
-        grandTotal += rule.amount;
-      }
-    });
-
-    installments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-
-    feePayment = new FeePayment({
-      schoolId: req.schoolId,
-      student: student._id,
-      studentName: student.name,
-      studentID: student.studentID,
-      class: student.class,
-      className: student.className,
-      section: student.section,
-      academicYear,
-      installments: installments,
-      feeStructure: classData.feeStructure,
-      totalAmount: grandTotal,
-      totalDue: grandTotal,
+  // ===== Handle first payment or missing installmentId =====
+  if (!installmentId) {
+    // No installment exists → create first installment
+    installment = {
+      _id: new mongoose.Types.ObjectId(),
+      name: `First Payment`,
+      headName: "Tuition", // You can customize or pass from frontend
+      amount: paidAmt,
       paidAmount: 0,
-      pendingAmount: grandTotal,
-      balancePending: grandTotal,
-      status: 'PENDING'
-    });
-  }
-
-  if (amount > feePayment.balancePending) {
-    throw new ValidationError(`Payment amount (₹${amount}) exceeds pending amount (₹${feePayment.balancePending})`);
-  }
-
-  let remainingPayment = amount;
-  let coveredInstallments = [];
-
-  feePayment.installments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-
-  for (let inst of feePayment.installments) {
-    if (remainingPayment <= 0) break;
-    if (inst.status === 'PAID') continue;
-    const pendingForThis = inst.amount - inst.paidAmount;
-    let allocated = 0;
-    if (remainingPayment >= pendingForThis) {
-      allocated = pendingForThis;
-      inst.paidAmount += allocated;
-      inst.status = 'PAID';
-      inst.paymentDate = paymentDateObj;
-    } else {
-      allocated = remainingPayment;
-      inst.paidAmount += allocated;
-      inst.status = 'PARTIAL';
-      inst.paymentDate = paymentDateObj;
+      dueDate: new Date(),
+      status: "PENDING",
+    };
+    fee.installments.push(installment);
+  } else {
+    // Existing installment
+    installment = fee.installments.find(
+      (inst) => inst._id.toString() === installmentId
+    );
+    if (!installment) {
+      throw new Error("Installment not found");
     }
-    remainingPayment -= allocated;
-    coveredInstallments.push({
-      installmentId: inst._id,
-      installmentName: inst.name,
-      amount: allocated
-    });
   }
 
-  const year = new Date().getFullYear().toString().slice(-2);
-  const receiptCount = await FeePayment.countDocuments({ 
-    schoolId: req.schoolId,
-    'payments.receiptNumber': { $regex: `^RCP${year}` }
+  // ===== UPDATE INSTALLMENT =====
+  installment.paidAmount += paidAmt;
+  if (installment.paidAmount >= installment.amount) {
+    installment.status = "PAID";
+  } else {
+    installment.status = "PARTIAL";
+  }
+
+  // ===== PUSH PAYMENT =====
+  fee.payments.push({
+    receiptNumber,
+    paymentMode,
+    paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+    amount: paidAmt,
+    installmentsCovered: [
+      {
+        installmentId: installment._id,
+        amount: paidAmt,
+      },
+    ],
   });
-  const receiptNumber = `RCP${year}${(receiptCount + 1).toString().padStart(5, '0')}`;
 
-  const paymentRecord = {
-    amount: amount,
-    paymentDate: paymentDateObj,
-    paymentMode: paymentMethod,
-    receiptNumber,
-    receivedBy: req.user.id,
-    remarks: remarks || '',
-    transactionId: transactionId || '',
-    chequeNumber: chequeNumber || '',
-    bankName: bankName || '',
-    upiId: upiId || '',
-    installmentsCovered: coveredInstallments
-  };
+  // ===== UPDATE TOTALS =====
+  fee.totalPaid = (fee.totalPaid || 0) + paidAmt;
+  fee.balancePending = (fee.totalDue || fee.totalAmount || 0) - fee.totalPaid;
 
-  // Safeguard: payments array undefined ho toh []
-  if (!feePayment.payments) feePayment.payments = [];
-  feePayment.payments.push(paymentRecord);
-  feePayment.totalPaid = (feePayment.totalPaid || 0) + amount;
-  feePayment.paidAmount += amount;
-  feePayment.balancePending -= amount;
-  feePayment.pendingAmount = feePayment.balancePending;
+  fee.status =
+    fee.balancePending <= 0
+      ? "PAID"
+      : fee.totalPaid > 0
+      ? "PARTIAL"
+      : "PENDING";
 
-  if (feePayment.balancePending <= 0) {
-    feePayment.status = 'PAID';
-    feePayment.balancePending = 0;
-    feePayment.pendingAmount = 0;
-  } else if (feePayment.paidAmount > 0) {
-    feePayment.status = 'PARTIALLY_PAID';
-  }
+  await fee.save();
 
-  const hasOverdueInstallment = feePayment.installments.some(inst => 
-    inst.status !== 'PAID' && new Date(inst.dueDate) < new Date()
-  );
-  if (hasOverdueInstallment && feePayment.balancePending > 0) {
-    feePayment.status = 'OVERDUE';
-  }
-
-  await feePayment.save();
-  await feePayment.populate('payments.receivedBy', 'name email');
-  await feePayment.populate('student', 'name studentID className section');
-  await feePayment.populate('installments.head', 'name type');
-
-  return successResponse(res, 'Payment Recorded Successfully', { 
-    feePayment,
-    receiptNumber,
-    paymentRecord,
-    balancePending: feePayment.balancePending,
-    coveredInstallments
+  return res.status(200).json({
+    success: true,
+    message: "Payment recorded successfully",
+    paidAmount: fee.totalPaid,
+    pendingAmount: fee.balancePending,
+    status: fee.status,
+    installmentId: installment._id, // useful for frontend
   });
 });
+
+// export const recordPayment = asyncHandler(async (req, res) => {
+//   const { 
+//     studentId, 
+//     feePaymentId, 
+//     amountPaid, 
+//     paymentMethod, 
+//     transactionId, 
+//     chequeNumber, 
+//     bankName, 
+//     upiId, 
+//     paymentDate, 
+//     remarks, 
+//     academicYear 
+//   } = req.body;
+
+//   if (!studentId || !amountPaid || !paymentMethod || !paymentDate || !academicYear) {
+//     throw new ValidationError('Required fields missing');
+//   }
+
+//   const amount = parseFloat(amountPaid);
+//   if (isNaN(amount) || amount <= 0) {
+//     throw new ValidationError('Amount must be a valid number greater than 0');
+//   }
+
+//   let paymentDateObj = new Date(paymentDate);
+//   if (isNaN(paymentDateObj.getTime())) {
+//     paymentDateObj = new Date(paymentDate + 'T00:00:00.000Z');
+//   }
+//   if (isNaN(paymentDateObj.getTime())) {
+//     throw new ValidationError('Invalid paymentDate format, expected YYYY-MM-DD');
+//   }
+
+//   let feePayment;
+//   if (feePaymentId) {
+//     feePayment = await FeePayment.findOne({ _id: feePaymentId, schoolId: req.schoolId });
+//   } else {
+//     feePayment = await FeePayment.findOne({ student: studentId, academicYear, schoolId: req.schoolId });
+//   }
+
+//   if (!feePayment) {
+//     const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId }).lean();
+//     if (!student) throw new NotFoundError('Student not found');
+//     const classData = await Class.findOne({ _id: student.class, academicYear, schoolId: req.schoolId }).populate('feeStructure.head').lean();
+//     if (!classData?.feeStructure || !classData.feeStructure.length) {
+//       throw new ValidationError('Fee structure not set for this student\'s class');
+//     }
+
+//     let installments = [];
+//     let grandTotal = 0;
+
+//     classData.feeStructure.forEach(rule => {
+//       if (rule.frequency === 'MONTHLY') {
+//         const months = ['APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'JAN', 'FEB', 'MAR'];
+//         months.forEach((month, index) => {
+//           const year = academicYear.split('-')[0];
+//           const monthNum = (index + 3) % 12 + 1;
+//           const dueDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-10`);
+//           installments.push({
+//             head: rule.head._id,
+//             headName: rule.headName,
+//             name: `${month} - ${rule.headName}`,
+//             amount: rule.amount,
+//             dueDate: dueDate,
+//             paidAmount: 0,
+//             status: 'PENDING'
+//           });
+//           grandTotal += rule.amount;
+//         });
+//       } else if (rule.frequency === 'QUARTERLY') {
+//         const quarters = [
+//           { name: 'Q1 (APR-JUN)', dueDate: new Date(`${academicYear.split('-')[0]}-04-10`) },
+//           { name: 'Q2 (JUL-SEP)', dueDate: new Date(`${academicYear.split('-')[0]}-07-10`) },
+//           { name: 'Q3 (OCT-DEC)', dueDate: new Date(`${academicYear.split('-')[0]}-10-10`) },
+//           { name: 'Q4 (JAN-MAR)', dueDate: new Date(`${Number(academicYear.split('-')[0]) + 1}-01-10`) }
+//         ];
+//         quarters.forEach(quarter => {
+//           installments.push({
+//             head: rule.head._id,
+//             headName: rule.headName,
+//             name: `${quarter.name} - ${rule.headName}`,
+//             amount: rule.amount * 3,
+//             dueDate: quarter.dueDate,
+//             paidAmount: 0,
+//             status: 'PENDING'
+//           });
+//           grandTotal += rule.amount * 3;
+//         });
+//       } else if (rule.frequency === 'YEARLY' || rule.frequency === 'ONE_TIME') {
+//         const dueDate = new Date(`${academicYear.split('-')[0]}-04-10`);
+//         installments.push({
+//           head: rule.head._id,
+//           headName: rule.headName,
+//           name: rule.headName,
+//           amount: rule.amount,
+//           dueDate: dueDate,
+//           paidAmount: 0,
+//           status: 'PENDING'
+//         });
+//         grandTotal += rule.amount;
+//       }
+//     });
+
+//     installments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+//     feePayment = new FeePayment({
+//       schoolId: req.schoolId,
+//       student: student._id,
+//       studentName: student.name,
+//       studentID: student.studentID,
+//       class: student.class,
+//       className: student.className,
+//       section: student.section,
+//       academicYear,
+//       installments: installments,
+//       feeStructure: classData.feeStructure,
+//       totalAmount: grandTotal,
+//       totalDue: grandTotal,
+//       paidAmount: 0,
+//       pendingAmount: grandTotal,
+//       balancePending: grandTotal,
+//       status: 'PENDING'
+//     });
+//   }
+
+//   if (amount > feePayment.balancePending) {
+//     throw new ValidationError(`Payment amount (₹${amount}) exceeds pending amount (₹${feePayment.balancePending})`);
+//   }
+
+//   let remainingPayment = amount;
+//   let coveredInstallments = [];
+
+//   feePayment.installments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+//   for (let inst of feePayment.installments) {
+//     if (remainingPayment <= 0) break;
+//     if (inst.status === 'PAID') continue;
+//     const pendingForThis = inst.amount - inst.paidAmount;
+//     let allocated = 0;
+//     if (remainingPayment >= pendingForThis) {
+//       allocated = pendingForThis;
+//       inst.paidAmount += allocated;
+//       inst.status = 'PAID';
+//       inst.paymentDate = paymentDateObj;
+//     } else {
+//       allocated = remainingPayment;
+//       inst.paidAmount += allocated;
+//       inst.status = 'PARTIAL';
+//       inst.paymentDate = paymentDateObj;
+//     }
+//     remainingPayment -= allocated;
+//     coveredInstallments.push({
+//       installmentId: inst._id,
+//       installmentName: inst.name,
+//       amount: allocated
+//     });
+//   }
+
+//   const year = new Date().getFullYear().toString().slice(-2);
+//   const receiptCount = await FeePayment.countDocuments({ 
+//     schoolId: req.schoolId,
+//     'payments.receiptNumber': { $regex: `^RCP${year}` }
+//   });
+//   const receiptNumber = `RCP${year}${(receiptCount + 1).toString().padStart(5, '0')}`;
+
+//   // const paymentRecord = {
+//   //   amount: amount,
+//   //   paymentDate: paymentDateObj,
+//   //   paymentMode: paymentMethod,
+//   //   receiptNumber,
+//   //   receivedBy: req.user.id,
+//   //   remarks: remarks || '',
+//   //   transactionId: transactionId || '',
+//   //   chequeNumber: chequeNumber || '',
+//   //   bankName: bankName || '',
+//   //   upiId: upiId || '',
+//   //   installmentsCovered: coveredInstallments
+//   // };
+
+// const paymentRecord = asyncHandler(async (req, res) => {
+//     const { feeId, installmentId, amount } = req.body;
+
+// const fee = await FeePayment.findById(feeId);
+// if (!fee) throw new Error("Fee record not found");
+
+// // 🔥 STEP 1: installment find karo
+// const installment = fee.installments.find(
+//   i => i._id.toString() === installmentId
+// );
+
+// if (!installment) throw new Error("Installment not found");
+
+// // 🔥 STEP 2: installment payment update
+// installment.paidAmount += Number(amount);
+
+// if (installment.paidAmount >= installment.amount) {
+//   installment.status = "PAID";
+// } else {
+//   installment.status = "PARTIAL";
+// }
+
+// // 🔥 STEP 3: TOTAL update
+// fee.paidAmount = (fee.paidAmount || 0) + Number(amount);
+// fee.pendingAmount = fee.totalAmount - fee.paidAmount;
+// fee.balancePending = fee.pendingAmount;
+
+// // 🔥 STEP 4: overall status
+// fee.status =
+//   fee.pendingAmount === 0
+//     ? "PAID"
+//     : fee.paidAmount > 0
+//     ? "PARTIAL"
+//     : "PENDING";
+
+// await fee.save();
+
+// return res.json({
+//   success: true,
+//   message: "Payment recorded successfully",
+//   paidAmount: fee.paidAmount,
+//   pendingAmount: fee.pendingAmount
+// });
+
+//   })
+
+
+//   // Safeguard: payments array undefined ho toh []
+//   if (!feePayment.payments) feePayment.payments = [];
+//   feePayment.payments.push(paymentRecord);
+//   feePayment.totalPaid = (feePayment.totalPaid || 0) + amount;
+//   feePayment.paidAmount += amount;
+//   feePayment.balancePending -= amount;
+//   feePayment.pendingAmount = feePayment.balancePending;
+
+//   if (feePayment.balancePending <= 0) {
+//     feePayment.status = 'PAID';
+//     feePayment.balancePending = 0;
+//     feePayment.pendingAmount = 0;
+//   } else if (feePayment.paidAmount > 0) {
+//     feePayment.status = 'PARTIALLY_PAID';
+//   }
+
+//   const hasOverdueInstallment = feePayment.installments.some(inst => 
+//     inst.status !== 'PAID' && new Date(inst.dueDate) < new Date()
+//   );
+//   if (hasOverdueInstallment && feePayment.balancePending > 0) {
+//     feePayment.status = 'OVERDUE';
+//   }
+
+//   await feePayment.save();
+//   await feePayment.populate('payments.receivedBy', 'name email');
+//   await feePayment.populate('student', 'name studentID className section');
+//   await feePayment.populate('installments.head', 'name type');
+
+//   return successResponse(res, 'Payment Recorded Successfully', { 
+//     feePayment,
+//     receiptNumber,
+//     paymentRecord,
+//     balancePending: feePayment.balancePending,
+//     coveredInstallments
+//   });
+// });
 
 // ==========================================
 // 5. STATISTICS & REPORTS

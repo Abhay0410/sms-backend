@@ -101,3 +101,61 @@ export const getMyTodayAttendance = asyncHandler(async (req, res) => {
     // If no record, return null so frontend knows to show "Check In" button
     return successResponse(res, 'Today\'s status retrieved', record || null);
 });
+// Get teacher's own attendance history (last 30 days)
+export const getRecentAttendance = asyncHandler(async (req, res) => {
+    const teacherId = req.user.id;
+    const schoolId = req.schoolId;
+
+    // Fetch records from the last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const history = await StaffAttendance.find({
+        teacherId,
+        schoolId,
+        date: { $gte: thirtyDaysAgo }
+    }).sort({ date: -1 });
+
+    return successResponse(res, 'Recent attendance history retrieved', history);
+});
+// controllers/teacher/teacher.hr.controller.js
+
+export const getAttendanceStats = asyncHandler(async (req, res) => {
+    const teacherId = req.user.id;
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    const records = await StaffAttendance.find({
+        teacherId,
+        schoolId: req.schoolId,
+        date: { $gte: firstDay, $lte: lastDay }
+    });
+
+    // Helper to calculate minutes from HH:mm:ss
+    const getMinutes = (timeStr) => {
+        if (!timeStr) return 0;
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+    };
+
+    let totalMinutesWorked = 0;
+    let daysWithCheckOut = 0;
+
+    records.forEach(r => {
+        if (r.checkIn && r.checkOut) {
+            totalMinutesWorked += (getMinutes(r.checkOut) - getMinutes(r.checkIn));
+            daysWithCheckOut++;
+        }
+    });
+
+    const stats = {
+        presentDays: records.filter(r => ['PRESENT', 'HALF_DAY', 'LATE'].includes(r.status)).length,
+        lateDays: records.filter(r => r.status === 'LATE').length,
+        totalWorkingDays: 26, // Usually fixed per month
+        attendanceRate: records.length > 0 ? ((records.length / 26) * 100).toFixed(1) : 0,
+        avgHours: daysWithCheckOut > 0 ? (totalMinutesWorked / daysWithCheckOut / 60).toFixed(1) : 0
+    };
+
+    return successResponse(res, 'Stats retrieved', stats);
+});

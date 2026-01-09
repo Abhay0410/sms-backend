@@ -5,7 +5,9 @@ import {
     markAttendance, 
     markCheckOut, 
     applyLeave, 
-    getMyLeaves 
+    getMyLeaves,
+    getRecentAttendance,
+    getAttendanceStats
 } from "../../controllers/teacher/teacher.hr.controller.js";
 
 const router = Router();
@@ -14,7 +16,8 @@ const router = Router();
 router.get("/attendance/today", requireAuth(["teacher"]), getMyTodayAttendance);
 router.post("/attendance/in", requireAuth(["teacher"]), markAttendance);
 router.post("/attendance/out", requireAuth(["teacher"]), markCheckOut);
-
+router.get("/attendance/recent", requireAuth(["teacher"]), getRecentAttendance);
+router.get("/attendance/stats", requireAuth(["teacher"]), getAttendanceStats);
 // Leave Applications
 router.post("/leaves/apply", requireAuth(["teacher"]), applyLeave);
 router.get("/leaves/my", requireAuth(["teacher"]), getMyLeaves);

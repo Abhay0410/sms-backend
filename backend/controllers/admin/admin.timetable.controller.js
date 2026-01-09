@@ -8,84 +8,48 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 
 // Create timetable - MULTI-TENANT
 export const createTimetable = asyncHandler(async (req, res) => {
-  const { classId, section, academicYear, schedule, effectiveFrom, effectiveTo, overwrite = false } = req.body;
-  const adminId = req.user.id;
-  
-  if (!classId || !section || !academicYear) {
-    throw new ValidationError('Class, section, and academic year are required');
+  const { classId, section, academicYear, schedule, overwrite = false } = req.body;
+  const schoolId = req.schoolId; // ✅ Always use tenant context
+
+  if (!classId || !section || !academicYear || !schedule) {
+    throw new ValidationError('All fields including the schedule array are required');
   }
-  
-  const classData = await Class.findOne({
-    _id: classId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
-  });
-  if (!classData) {
-    throw new NotFoundError('Class');
+
+  // 1. Verify Class belongs to this school
+  const classData = await Class.findOne({ _id: classId, schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  // 2. Check for existing active timetable for this specific section
+  const existingTT = await Timetable.findOne({ class: classId, section, academicYear, schoolId, isActive: true });
+
+  if (existingTT && !overwrite) {
+    throw new ValidationError('Timetable already exists. Please enable overwrite to update.');
   }
-  
-  // Check if timetable already exists - MULTI-TENANT
-  const existingTimetable = await Timetable.findOne({
-    class: classId,
-    section,
-    academicYear,
-    schoolId: req.schoolId,  // ✅ MULTI-TENANT
-    isActive: true
-  });
-  
+
   let timetable;
-  
-  console.log('📥 Incoming schedule:', {
-    days: schedule?.map(s => ({ day: s.day, periods: s.periods?.length })),
-    saturday: schedule?.find(s => s.day === 'Saturday')?.periods?.filter(p => p.isBreak)
-  });
-  
-  if (existingTimetable) {
-    if (overwrite) {
-      console.log('🔄 Updating existing timetable:', existingTimetable._id);
-      
-      existingTimetable.schedule = schedule || [];
-      existingTimetable.effectiveFrom = effectiveFrom || new Date();
-      existingTimetable.effectiveTo = effectiveTo;
-      existingTimetable.status = 'draft';
-      existingTimetable.updatedAt = new Date();
-      
-      await existingTimetable.save();
-      timetable = existingTimetable;
-      
-      console.log('✅ Existing timetable updated successfully');
-    } else {
-      throw new ValidationError('Active timetable already exists for this class and section. Use overwrite=true to replace it.');
-    }
+  if (existingTT && overwrite) {
+    // Update the existing document with the new smart template
+    existingTT.schedule = schedule;
+    existingTT.updatedAt = new Date();
+    existingTT.status = 'draft'; // Revert to draft after template change
+    await existingTT.save();
+    timetable = existingTT;
   } else {
-    console.log('🆕 Creating new timetable');
+    // Create a brand new document
     timetable = new Timetable({
-      schoolId: req.schoolId,  // ✅ MULTI-TENANT
+      schoolId,
       class: classId,
       className: classData.className,
       section,
       academicYear,
-      schedule: schedule || [],
-      effectiveFrom: effectiveFrom || new Date(),
-      effectiveTo,
-      isActive: true,
+      schedule,
       status: 'draft',
-      createdBy: adminId
+      createdBy: req.user.id
     });
-    
     await timetable.save();
-    console.log('✅ New timetable created successfully');
   }
-  
-  await timetable.populate('class', 'className');
-  await timetable.populate('schedule.periods.teacher', 'name teacherID');
-  
-  console.log('💾 Saved timetable:', {
-    id: timetable._id,
-    days: timetable.schedule?.map(s => ({ day: s.day, periods: s.periods?.length })),
-    saturdayLunch: timetable.schedule?.find(s => s.day === 'Saturday')?.periods?.filter(p => p.isBreak)
-  });
-  
-  return successResponse(res, 'Timetable processed successfully', timetable, existingTimetable ? 200 : 201);
+
+  return successResponse(res, 'Smart Timetable Generated', timetable, 201);
 });
 
 // Get all timetables - MULTI-TENANT

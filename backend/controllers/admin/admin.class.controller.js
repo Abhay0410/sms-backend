@@ -157,80 +157,52 @@ export const deleteClass = asyncHandler(async (req, res) => {
   return successResponse(res, 'Class deleted successfully');
 });
 
-// Assign students to section - MULTI-TENANT
+// Assign students to section
 export const assignStudentsToSection = asyncHandler(async (req, res) => {
   const { classId, sectionName } = req.params;
   const { studentIds } = req.body;
-  
-  if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
-    throw new ValidationError('Student IDs array is required');
-  }
-  
-  const classData = await Class.findOne({ 
-    _id: classId, 
-    schoolId: req.schoolId 
-  });
-  
-  if (!classData) {
-    throw new NotFoundError('Class');
-  }
-  
-  const section = classData.sections.find(s => s.sectionName === sectionName);
-  
-  if (!section) {
-    throw new NotFoundError('Section');
-  }
-  
-  // Check capacity
-  const availableSeats = section.capacity - section.currentStrength;
-  
-  if (studentIds.length > availableSeats) {
-    throw new ValidationError(`Only ${availableSeats} seats available in section ${sectionName}`);
-  }
-  
-  // Validate students belong to school
-  const updatePromises = studentIds.map(async (studentId, index) => {
-    const student = await Student.findOne({ 
-      _id: studentId, 
-      schoolId: req.schoolId // ✅ Strict Tenant Check
-    });
-    
-    if (student) {
-      student.class = classId;
-      student.className = classData.className;
-      student.section = sectionName;
-      student.rollNumber = (section.currentStrength + index + 1).toString().padStart(2, '0');
-      student.status = 'ENROLLED';
-      student.academicYear = classData.academicYear;
-      
-      await student.save();
-      return student;
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  const targetSection = classData.sections.find(s => s.sectionName === sectionName);
+  if (!targetSection) throw new NotFoundError('Section');
+
+  const updatePromises = studentIds.map(async (studentId) => {
+    const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
+    if (!student) return null;
+
+    const oldSectionName = student.section;
+
+    // SCENARIO 1: Student is already in the target section - Do nothing
+    if (oldSectionName === sectionName) return student;
+
+    // SCENARIO 2: Student is shifting from one section to another in the same class
+    if (oldSectionName && oldSectionName !== "") {
+      const oldSection = classData.sections.find(s => s.sectionName === oldSectionName);
+      if (oldSection) {
+        oldSection.currentStrength = Math.max(0, oldSection.currentStrength - 1);
+      }
+      targetSection.currentStrength += 1;
+    } 
+    // SCENARIO 3: Student is new (REGISTERED but not yet in any section)
+    else {
+      targetSection.currentStrength += 1;
     }
-    return null;
+
+    // Standardize student record
+    student.class = classId;
+    student.className = classData.className;
+    student.section = sectionName;
+    student.status = 'ENROLLED'; // Fixes the "Registration Pending" issue
+    await student.save();
+    return student;
   });
-  
-  const updatedStudents = await Promise.all(updatePromises);
-  const successCount = updatedStudents.filter(s => s !== null).length;
-  
-  // Update section strength
-  section.currentStrength += successCount;
+
+  await Promise.all(updatePromises);
   await classData.save();
-  
-  return successResponse(res, `${successCount} students assigned to section ${sectionName}`, {
-    assignedCount: successCount,
-    className: classData.className,
-    section: sectionName,
-    newStrength: section.currentStrength,
-    capacity: section.capacity,
-    availableSeats: section.capacity - section.currentStrength,
-    students: updatedStudents.filter(s => s !== null).map(s => ({
-      id: s._id,
-      studentID: s.studentID,
-      name: s.name,
-      rollNumber: s.rollNumber,
-      section: s.section
-    }))
-  });
+
+  return successResponse(res, `Enrolled/Shifted successfully`, classData);
 });
 
 // Promote students - MULTI-TENANT
@@ -431,6 +403,90 @@ export const updateClassFeeStructure = asyncHandler(async (req, res) => {
   });
 });
 
+// Shift student between sections - MULTI-TENANT
+export const shiftStudentSection = asyncHandler(async (req, res) => {
+  const { classId } = req.params;
+  const { studentId, fromSection, toSection } = req.body;
+
+  if (!studentId || !fromSection || !toSection) {
+    throw new ValidationError('Student ID, source section, and target section are required');
+  }
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  const sourceSection = classData.sections.find(s => s.sectionName === fromSection);
+  const targetSection = classData.sections.find(s => s.sectionName === toSection);
+
+  if (!sourceSection || !targetSection) throw new ValidationError('Invalid source or target section');
+
+  // Check capacity in target
+  if (targetSection.currentStrength >= targetSection.capacity) {
+    throw new ValidationError(`Target section ${toSection} is full`);
+  }
+
+  // Update Student Document
+  const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
+  if (!student) throw new NotFoundError('Student');
+
+  student.section = toSection;
+  await student.save();
+
+  // Update Class Strengths
+  sourceSection.currentStrength = Math.max(0, sourceSection.currentStrength - 1);
+  targetSection.currentStrength += 1;
+  await classData.save();
+
+  return successResponse(res, `Student shifted to section ${toSection} successfully`, {
+    studentName: student.name,
+    newSection: toSection
+  });
+});
+
+// Get actual student counts from DB for all classes - MULTI-TENANT
+export const getClassStatistics = asyncHandler(async (req, res) => {
+  const { academicYear } = req.query;
+  const schoolId = req.schoolId;
+
+  // 1. Fetch all classes for the school/year
+  const classes = await Class.find({ schoolId, academicYear }).lean();
+
+  // 2. Use Aggregation to count actual students in each section
+  const stats = await Student.aggregate([
+    { 
+      $match: { 
+        schoolId: new mongoose.Types.ObjectId(schoolId), 
+        academicYear,
+        status: 'ENROLLED' 
+      } 
+    },
+    { 
+      $group: { 
+        _id: { classId: "$class", section: "$section" }, 
+        count: { $sum: 1 } 
+      } 
+    }
+  ]);
+
+  // 3. Map counts back to classes
+  const updatedClasses = classes.map(cls => {
+    let classTotal = 0;
+    const updatedSections = cls.sections.map(sec => {
+      const stat = stats.find(s => 
+        s._id.classId?.toString() === cls._id.toString() && 
+        s._id.section === sec.sectionName
+      );
+      const actualCount = stat ? stat.count : 0;
+      classTotal += actualCount;
+      return { ...sec, currentStrength: actualCount };
+    });
+
+    return { ...cls, sections: updatedSections, totalEnrolled: classTotal };
+  });
+
+  return successResponse(res, 'Statistics retrieved successfully', updatedClasses);
+});
+
 export default {
   getAllClasses,
   getClasses,
@@ -444,4 +500,6 @@ export default {
   copyAcademicYear,
   getAcademicYears,
   updateClassFeeStructure,
+  shiftStudentSection,
+  getClassStatistics,
 };

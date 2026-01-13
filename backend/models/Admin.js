@@ -11,6 +11,7 @@ const adminSchema = new mongoose.Schema({
   password: { type: String, required: true },
   adminID: { type: String, required: true, unique: true },
   phone: { type: String, required: true },
+  
 
   dateOfBirth: Date,
   gender: { type: String, enum: ['Male', 'Female', 'Other'] },
@@ -33,9 +34,13 @@ const adminSchema = new mongoose.Schema({
   }],
 
   isSuperAdmin: { type: Boolean, default: false },
-  profilePicture: String,
-  role: { type: String, default: 'admin' },
-  isActive: { type: Boolean, default: true },
+
+profilePicture: { type: String, default: '' },
+profilePicturePublicId: { type: String, default: '' },
+
+role: { type: String, default: 'admin' },
+isActive: { type: Boolean, default: true },
+
 }, { timestamps: true });
 
 adminSchema.index({ schoolId: 1 });

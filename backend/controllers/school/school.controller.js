@@ -2,6 +2,7 @@ import School from '../../models/School.js';
 import Admin from '../../models/Admin.js';
 import Class from '../../models/Class.js';
 import bcrypt from 'bcryptjs';
+import { NotFoundError } from '../../utils/errors.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { successResponse } from '../../utils/response.js';
 import { signToken } from '../../utils/generateToken.js';

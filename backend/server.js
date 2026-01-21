@@ -53,7 +53,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
-
+console.log("✅ Environment variables loaded:");
+console.log("  JWT_SECRET exists:", !!process.env.JWT_SECRET);
+console.log("  MONGODB_URI exists:", !!process.env.MONGODB_URI);
 const app = express();
 const isProd = process.env.NODE_ENV === 'production';
 

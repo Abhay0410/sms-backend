@@ -1,4 +1,4 @@
-// controllers/auth/parent.auth.controller.js - MULTI-TENANT VERSION
+// controllers/auth/parent.auth.controller.js - MULTI-TENANT VERSION (UPDATED)
 import bcrypt from "bcryptjs";
 import Parent from "../../models/Parent.js";
 import { signToken } from "../../utils/jwt.js";
@@ -8,25 +8,50 @@ import { AuthenticationError, ValidationError, NotFoundError } from "../../utils
 
 // Helper to remove sensitive data and include schoolId
 const safeParent = (parent) => {
-  const obj = parent.toObject();
+  if (!parent) return null;
+  
+  const obj = parent.toObject ? parent.toObject() : parent;
   delete obj.password;
-  return obj;
+  
+  return {
+    id: obj._id || obj.id,
+    parentID: obj.parentID,
+    name: obj.name,
+    email: obj.email,
+    phone: obj.phone,
+    occupation: obj.occupation,
+    qualification: obj.qualification,
+    address: obj.address,
+    profilePicture: obj.profilePicture,
+    children: obj.children,
+    role: obj.role,
+    schoolId: obj.schoolId,
+    isActive: obj.isActive,
+    lastLogin: obj.lastLogin,
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt
+  };
 };
 
-// LOGIN - include schoolId in token
+// LOGIN - include schoolId in token AND require schoolId in login query
 export const login = asyncHandler(async (req, res) => {
-  const { parentID, password } = req.body || {};
+  // ✅ FIX: Extract schoolId from request body - REQUIRED for tenant isolation
+  const { parentID, password, schoolId } = req.body || {};
   
-  if (!parentID || !password) {
-    throw new ValidationError("parentID and password are required");
+  if (!parentID || !password || !schoolId) {
+    throw new ValidationError("parentID, password, and schoolId are required");
   }
 
-  const parent = await Parent.findOne({ parentID })
+  // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
+  const parent = await Parent.findOne({ 
+    parentID, 
+    schoolId // This ensures parent can only login to their own school
+  })
     .select("+password")
     .populate('children', 'name studentID className section status');
   
   if (!parent) {
-    throw new AuthenticationError("Invalid credentials");
+    throw new AuthenticationError("Invalid credentials for this institution.");
   }
 
   if (!parent.isActive) {
@@ -39,6 +64,11 @@ export const login = asyncHandler(async (req, res) => {
     throw new AuthenticationError("Invalid credentials");
   }
 
+  // Verify that the schoolId in token matches the parent's schoolId
+  if (parent.schoolId.toString() !== schoolId.toString()) {
+    throw new AuthenticationError("Unauthorized access to this institution.");
+  }
+
   parent.lastLogin = new Date();
   await parent.save();
 
@@ -46,12 +76,21 @@ export const login = asyncHandler(async (req, res) => {
   const token = signToken({ 
     id: parent._id.toString(), 
     role: "parent",
-    schoolId: parent.schoolId // Assumes Parent model has schoolId field
+    schoolId: parent.schoolId.toString() // Ensure string format
+  });
+
+  console.log("🔐 Parent login successful:", {
+    parentID: parent.parentID,
+    schoolId: parent.schoolId,
+    childrenCount: parent.children?.length || 0,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
   });
 
   return successResponse(res, "Login successful", {
     token,
     role: "parent",
+    schoolId: parent.schoolId,
     parent: safeParent(parent),
   });
 });
@@ -60,15 +99,16 @@ export const login = asyncHandler(async (req, res) => {
 export const validate = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   }).populate('children', 'name studentID className section status');
   
   if (!parent) {
-    throw new NotFoundError("Parent");
+    throw new NotFoundError("Parent not found in this institution");
   }
 
   return successResponse(res, "Token valid", { 
     role: "parent",
+    schoolId: parent.schoolId,
     parent: safeParent(parent)
   });
 });
@@ -81,11 +121,11 @@ export const profile = asyncHandler(async (req, res) => {
   
   const parent = await Parent.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   }).populate('children', 'name studentID className section status rollNumber email phone');
   
   if (!parent) {
-    throw new NotFoundError("Parent");
+    throw new NotFoundError("Parent not found in this institution");
   }
 
   return successResponse(res, "Profile retrieved successfully", {
@@ -97,18 +137,24 @@ export const profile = asyncHandler(async (req, res) => {
 export const getChildren = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   }).populate({
     path: 'children',
-    select: 'name studentID className section status rollNumber email phone profilePicture academicYear'
+    select: 'name studentID className section status rollNumber email phone profilePicture academicYear',
+    match: { schoolId: req.schoolId } // ✅ Ensure children belong to same school
   });
 
   if (!parent) {
-    throw new NotFoundError("Parent");
+    throw new NotFoundError("Parent not found in this institution");
   }
 
+  // Filter out any children that might not belong to this school
+  const children = (parent.children || []).filter(child => 
+    child && child.schoolId && child.schoolId.toString() === req.schoolId.toString()
+  );
+
   return successResponse(res, "Children retrieved successfully", {
-    children: parent.children || [],
+    children,
   });
 });
 
@@ -116,11 +162,11 @@ export const getChildren = asyncHandler(async (req, res) => {
 export const updateProfile = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   });
 
   if (!parent) {
-    throw new NotFoundError("Parent");
+    throw new NotFoundError("Parent not found in this institution");
   }
 
   const allowedFields = ["name", "phone", "occupation", "qualification"];
@@ -144,6 +190,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
   if (req.file) {
     parent.profilePicture = req.file.filename;
+    console.log("✅ Parent profile picture uploaded:", req.file.filename);
   }
 
   await parent.save();
@@ -167,11 +214,11 @@ export const changePassword = asyncHandler(async (req, res) => {
 
   const parent = await Parent.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   }).select("+password");
 
   if (!parent) {
-    throw new NotFoundError("Parent");
+    throw new NotFoundError("Parent not found in this institution");
   }
 
   const isMatch = await bcrypt.compare(currentPassword, parent.password);
@@ -183,12 +230,36 @@ export const changePassword = asyncHandler(async (req, res) => {
   parent.password = await bcrypt.hash(newPassword, 10);
   await parent.save();
 
+  console.log("🔑 Password changed for parent:", {
+    parentID: parent.parentID,
+    schoolId: parent.schoolId,
+    timestamp: new Date().toISOString()
+  });
+
   return successResponse(res, "Password changed successfully");
 });
 
 // LOGOUT
 export const logout = asyncHandler(async (req, res) => {
+  console.log("🔓 Parent logout:", {
+    parentId: req.user?.id,
+    schoolId: req.schoolId,
+    timestamp: new Date().toISOString()
+  });
+  
   return successResponse(res, "Logged out successfully");
+});
+
+// Additional security helper (optional)
+export const checkParentSchoolAccess = asyncHandler(async (req, res, next) => {
+  // Middleware to verify parent has access to requested school
+  const requestedSchoolId = req.params.schoolId || req.body.schoolId;
+  
+  if (requestedSchoolId && requestedSchoolId.toString() !== req.schoolId.toString()) {
+    throw new AuthenticationError("Access denied to this institution");
+  }
+  
+  next();
 });
 
 export default {
@@ -198,5 +269,6 @@ export default {
   getChildren,
   updateProfile,
   changePassword,
-  logout
+  logout,
+  checkParentSchoolAccess
 };

@@ -9,7 +9,8 @@ import {
   updateSubject,
   removeSubject,
   removeSubjectFromSections,
-  getSubjectStatistics
+  getSubjectStatistics,
+  removeSubjectFromMasterPool
 } from "../../controllers/admin/admin.subject.management.controller.js";  // ✅ FIXED PATH
 
 const router = Router();
@@ -21,6 +22,7 @@ router.use(requireAuth(["admin"]));
 router.get("/", getAllSubjects);
 router.get("/all", getAllSubjects);
 router.get("/class/:classId", getSubjectsByClass);
+router.delete("/remove-from-pool", removeSubjectFromMasterPool);
 router.get("/statistics", getSubjectStatistics);
 
 router.post("/add", addSubjectToClass);

@@ -13,17 +13,11 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // ==========================================
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
-
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  const { academicYear, search, status, page = 1, limit = 50 } = req.query;
+  const { academicYear, search, status, month, page = 1, limit = 50 } = req.query;
   const schoolId = req.schoolId;
 
-  if (!academicYear) {
-    throw new ValidationError("Academic year is required");
-  }
-
   let filter = { schoolId, academicYear, role: 'student' };
-
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -32,98 +26,49 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     ];
   }
 
-  const options = {
-    page: parseInt(page),
-    limit: parseInt(limit),
-    sort: { createdAt: -1 },
-    lean: true
-  };
-
-  const students = await Student.paginate(filter, options);
-
+  const students = await Student.paginate(filter, { page: parseInt(page), limit: parseInt(limit), lean: true });
   const studentsWithFees = [];
-  let totalPending = 0;
-  let totalPaid = 0;
-  let totalStudents = 0;
+  const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
   for (const student of students.docs) {
-    const feePayment = await FeePayment.findOne({
-      student: student._id,
-      academicYear,
-      schoolId
-    }).lean();
+    const fp = await FeePayment.findOne({ student: student._id, academicYear, schoolId }).lean();
+    if (!fp) continue;
 
-    // 🟢 CASE 1: FeePayment exists
-    if (feePayment) {
-      // ✅ STATUS FILTERING
-      if (status === "PAID" && feePayment.status !== "PAID") continue;
-      if (status === "PENDING" && feePayment.status === "PAID") continue;
-      if (status === "PARTIALLY_PAID" && feePayment.status !== "PARTIALLY_PAID") continue;
-      if (status === "OVERDUE" && feePayment.status !== "OVERDUE") continue;
-      if (status === "NOT_SET") continue; // Skip NOT_SET when filter is active
+    let dPaid = fp.totalPaid, dTotal = fp.totalDue, dStatus = fp.status;
 
-      const pendingAmount = feePayment.balancePending ?? 0;
-      const paidAmount = feePayment.totalPaid ?? feePayment.paidAmount ?? 0;
-      
-      // Update stats
-      totalPending += pendingAmount;
-      totalPaid += paidAmount;
-      totalStudents++;
-
-      studentsWithFees.push({
-        ...student,
-        feeDetails: {
-          totalFee: feePayment.totalDue ?? feePayment.totalAmount ?? 0,
-          paidAmount,
-          pendingAmount,
-          status: feePayment.status,
-          classHasFeeStructure: true,
-          feePaymentId: feePayment._id,
-          // 🔥 CRITICAL FIX: Include installments here
-          installments: feePayment.installments || []
-        }
-      });
-    }
-    // 🟢 CASE 2: FeePayment DOES NOT exist (0 payment student)
-    else {
-      // Only include if status is "NOT_SET" or no status filter
-      if (status === "PAID" || status === "PENDING" || 
-          status === "PARTIALLY_PAID" || status === "OVERDUE") {
-        continue;
-      }
-      // If status filter is "NOT_SET" specifically, include these
-      if (status === "NOT_SET" || !status) {
-        totalStudents++;
-        studentsWithFees.push({
-          ...student,
-          feeDetails: {
-            totalFee: 0,
-            paidAmount: 0,
-            pendingAmount: 0,
-            status: "NOT_SET",
-            classHasFeeStructure: false,
-            feePaymentId: null,
-            installments: [] // Empty if no record
-          }
-        });
+    if (monthPrefix) {
+      // 🔥 EXACT MATCH FIX: Find the specific month (e.g., JAN)
+      const target = fp.installments.find(i => i.name.toUpperCase().startsWith(monthPrefix));
+      if (target) {
+        dPaid = target.paidAmount; 
+        dTotal = target.amount; 
+        dStatus = target.status;
+      } else {
+        // If the student doesn't have an installment for this specific month
+        dPaid = 0; dTotal = 0; dStatus = "N/A";
       }
     }
+
+    // Filter Logic: A student is "Paid" for the selected context (Month or Year)
+    const isActuallyPaid = dStatus === "PAID" || (dTotal > 0 && dPaid >= dTotal);
+    
+    if (status === "paid" && !isActuallyPaid) continue;
+    if (status === "unpaid" && isActuallyPaid) continue;
+
+    studentsWithFees.push({
+      ...student,
+      feeDetails: {
+        totalFee: dTotal,
+        paidAmount: dPaid,
+        pendingAmount: Math.max(0, dTotal - dPaid),
+        status: isActuallyPaid ? "PAID" : dStatus,
+        installments: fp.installments
+      }
+    });
   }
-
-  return successResponse(res, "Students fetched successfully", {
-    students: studentsWithFees,
-    pagination: {
-      current: students.page,
-      pages: students.totalPages,
-      total: students.totalDocs
-    },
-    stats: {
-      totalPending,
-      totalPaid,
-      totalStudents,
-      // Optional: Calculate percentage
-      collectionRate: totalPaid > 0 ? Math.round((totalPaid / (totalPending + totalPaid)) * 100) : 0
-    }
+  return successResponse(res, "Fetched", { 
+    students: studentsWithFees, 
+    pagination: { current: students.page, pages: students.totalPages, total: students.totalDocs } 
   });
 });
 
@@ -489,72 +434,50 @@ export const recordPayment = asyncHandler(async (req, res) => {
   await fee.save();
   return successResponse(res, "Payment processed successfully", { feePayment: fee, receiptNumber });
 });
-
+// ==========================================
+// 5. FEE REPORTS & STATISTICS
+// ==========================================
 export const getFeeStatistics = asyncHandler(async (req, res) => {
-  const { academicYear } = req.query;
+  const { academicYear, month } = req.query; // month e.g., "JANUARY"
+  const schoolId = req.schoolId;
 
-  if (!academicYear) {
-    throw new ValidationError('Academic year is required');
-  }
+  const feePayments = await FeePayment.find({ schoolId, academicYear }).lean();
 
-  // 1️⃣ All fee payments of year
-  const feePayments = await FeePayment.find({
-    schoolId: req.schoolId,
-    academicYear
-  }).lean();
-
-  // 2️⃣ Student sets
-  const allStudentIds = new Set(
-    feePayments.map(fp => String(fp.student))
-  );
-
-  const paidStudentIds = new Set(
-    feePayments
-      .filter(fp => fp.status === 'PAID')
-      .map(fp => String(fp.student))
-  );
-
-  // 3️⃣ Counts
-  const totalStudents = allStudentIds.size;
-  const paid = paidStudentIds.size;
-  const unpaid = totalStudents - paid;
-
-  const partial = feePayments.filter(f => f.status === 'PARTIALLY_PAID').length;
-  const pending = feePayments.filter(f => f.status === 'PENDING').length;
-  const overdue = feePayments.filter(f => f.status === 'OVERDUE').length;
-
-  // 4️⃣ Amount calculations
   let totalExpected = 0;
   let totalCollected = 0;
-  let totalPending = 0;
+  let paidCount = 0;
+  let unpaidCount = 0;
 
-  feePayments.forEach(fee => {
-    totalExpected += Number(fee.totalDue ?? fee.totalAmount ?? 0);
-    totalCollected += Number(fee.totalPaid ?? fee.paidAmount ?? 0);
-    totalPending += Number(fee.balancePending ?? 0);
+  const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
+
+  feePayments.forEach(fp => {
+    if (monthPrefix) {
+      // 🎯 MONTHLY LOGIC: Match specific month (e.g., "JAN - tution fee")
+      const target = fp.installments.find(inst => 
+        inst.name.toUpperCase().startsWith(monthPrefix)
+      );
+
+      if (target) {
+        totalExpected += target.amount;
+        totalCollected += target.paidAmount;
+        if (target.status === "PAID") paidCount++; else unpaidCount++;
+      }
+    } else {
+      // 📊 YEARLY LOGIC
+      totalExpected += fp.totalDue;
+      totalCollected += fp.totalPaid;
+      const isActuallyPaid = (fp.totalDue - fp.totalPaid) <= 0;
+      if (isActuallyPaid) paidCount++; else unpaidCount++;
+    }
   });
 
-  const collectionPercentage =
-    totalExpected > 0
-      ? Math.round((totalCollected / totalExpected) * 100)
-      : 0;
-
-  // 5️⃣ Response
-  return successResponse(res, 'Fee statistics retrieved successfully', {
-    academicYear,
-    totalStudents,
+  return successResponse(res, 'Stats calculated', {
+    totalStudents: feePayments.length,
     totalExpected,
     totalCollected,
-    totalPending,
-    collectionPercentage: Math.min(collectionPercentage, 100),
-
-    paymentStatus: {
-      paid,        // ✅ sirf PAID
-      unpaid,      // ✅ partial + pending + overdue
-      partial,
-      pending,
-      overdue
-    }
+    totalPending: totalExpected - totalCollected,
+    collectionPercentage: totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0,
+    paymentStatus: { paid: paidCount, unpaid: unpaidCount }
   });
 });
 
@@ -626,6 +549,20 @@ export const downloadReceipt = asyncHandler(async (req, res) => {
 
     const payment = feePayment.payments.id(paymentId);
     if (!payment) return res.status(404).end();
+
+    // 1. Determine the context of the receipt
+    const isMonthlyPayment = payment.installmentsCovered && payment.installmentsCovered.length > 0;
+    
+    // 2. Logic for the Red/Green Status Badge on the PDF
+    // If it's a monthly payment and it cleared at least one month, show 'PAID' or 'MONTHLY CLEAR'
+    let displayStatus = feePayment.status; 
+    if (isMonthlyPayment) {
+      const allCoveredPaid = payment.installmentsCovered.every(ic => {
+          const inst = feePayment.installments.id(ic.installmentId);
+          return inst && inst.status === "PAID";
+      });
+      displayStatus = allCoveredPaid ? "MONTHLY PAID" : "PARTIAL";
+    }
 
     // 2) Get school info
     const school = await School.findById(req.schoolId).lean();
@@ -955,12 +892,7 @@ export const downloadReceipt = asyncHandler(async (req, res) => {
       .fontSize(14)
       .text(formatAmount(pending));
 
-    const statusColor =
-      feePayment.status === 'PAID'
-        ? '#059669'
-        : feePayment.status === 'PARTIALLY_PAID'
-        ? '#f59e0b'
-        : '#dc2626';
+    const statusColor = displayStatus.includes('PAID') ? '#059669' : '#dc2626';
 
     const badgeY = sumInnerTop + 46;
     doc.rect(col2X, badgeY, 100, 22).fill(statusColor).stroke();
@@ -969,13 +901,34 @@ export const downloadReceipt = asyncHandler(async (req, res) => {
       .font('Helvetica-Bold')
       .fillColor('white')
       .text(
-        String(feePayment.status || 'PAID').replace('_', ' '),
+        String(displayStatus || 'PAID').replace('_', ' '),
         col2X,
         badgeY + 3,
         { width: 100, align: 'center' }
       );
 
     yPos = sumBoxTop + sumBoxHeight + 25;
+    doc.y = yPos;
+
+    // ---------- INSTALLMENT BREAKDOWN ----------
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e293b').text('INSTALLMENT & PERIOD BREAKDOWN', marginLeft, yPos);
+    yPos += 20;
+
+    if (isMonthlyPayment) {
+      payment.installmentsCovered.forEach(ic => {
+        // Find the name from the actual installments array
+        const originalInst = feePayment.installments.find(i => i._id.toString() === ic.installmentId.toString());
+        const instName = originalInst ? originalInst.name : "Fee Installment";
+
+        doc.fontSize(10).font('Helvetica').fillColor('#475569').text(instName, marginLeft + 15, yPos);
+        doc.text(`Rs. ${formatAmount(ic.amount)}`, marginLeft + 350, yPos, { align: 'right', width: 100 });
+        yPos += 18;
+      });
+    } else {
+      doc.fontSize(10).text("General Fee Credit", marginLeft + 15, yPos);
+      yPos += 18;
+    }
+    
     doc.y = yPos;
 
     // ---------- AUTHORIZED SIGNATURE ----------

@@ -6,7 +6,7 @@ import {
     getMonthlyAttendanceReport,
     updateStaffAttendance,getAllLeaves
 } from "../../controllers/admin/admin.hr.controller.js";
-import { generateMonthlyPayroll } from "../../controllers/admin/admin.payroll.controller.js";
+
 
 const router = Router();
 
@@ -20,7 +20,6 @@ router.get("/leaves", requireAuth(["admin"]), getAllLeaves);
 
 router.put("/leaves/:leaveId/process", requireAuth(["admin"]), processLeaveRequest);
 
-// Payroll Engine
-router.post("/payroll/generate", requireAuth(["admin"]), generateMonthlyPayroll);
+
 
 export default router;

@@ -1,31 +1,68 @@
-// controllers/auth/student.auth.controller.js - MULTI-TENANT VERSION
+// controllers/auth/student.auth.controller.js - MULTI-TENANT VERSION (UPDATED)
 import bcrypt from "bcryptjs";
 import Student from "../../models/Student.js";
 import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
 import { AuthenticationError, ValidationError, NotFoundError } from "../../utils/errors.js";
-import { upload } from "../../middleware/upload.js";
 
 // Helper to remove sensitive data
 const safeStudent = (student) => {
-  const obj = student.toObject();
+  if (!student) return null;
+  
+  const obj = student.toObject ? student.toObject() : student;
   delete obj.password;
-  return obj;
+  
+  return {
+    id: obj._id || obj.id,
+    studentID: obj.studentID,
+    name: obj.name,
+    email: obj.email,
+    phone: obj.phone,
+    dateOfBirth: obj.dateOfBirth,
+    gender: obj.gender,
+    bloodGroup: obj.bloodGroup,
+    nationality: obj.nationality,
+    address: obj.address,
+    profilePicture: obj.profilePicture,
+    className: obj.className,
+    section: obj.section,
+    rollNumber: obj.rollNumber,
+    class: obj.class,
+    parent: obj.parent,
+    status: obj.status,
+    role: obj.role,
+    schoolId: obj.schoolId,
+    isActive: obj.isActive,
+    lastLogin: obj.lastLogin,
+    academicYear: obj.academicYear,
+    medicalHistory: obj.medicalHistory,
+    allergies: obj.allergies,
+    emergencyContact: obj.emergencyContact,
+    transportRequired: obj.transportRequired,
+    busRoute: obj.busRoute,
+    pickupPoint: obj.pickupPoint,
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt
+  };
 };
 
-// ✅ LOGIN - include schoolId in token
+// ✅ LOGIN - include schoolId in token AND require schoolId in login query
 export const login = asyncHandler(async (req, res) => {
-  const { studentID, password ,schoolId } = req.body || {};
+  const { studentID, password, schoolId } = req.body || {};
   
   if (!studentID || !password || !schoolId) {
-    throw new ValidationError("studentID and password are required");
+    throw new ValidationError("studentID, password, and schoolId are required");
   }
 
-  const student = await Student.findOne({ studentID,schoolId}).select("+password");
+  // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
+  const student = await Student.findOne({ 
+    studentID, 
+    schoolId // This ensures student can only login to their own school
+  }).select("+password");
   
   if (!student) {
-    throw new AuthenticationError("Invalid credentials");
+    throw new AuthenticationError("Invalid credentials for this institution.");
   }
 
   // ✅ Allow both REGISTERED and ENROLLED students to login
@@ -44,6 +81,11 @@ export const login = asyncHandler(async (req, res) => {
     throw new AuthenticationError("Invalid credentials");
   }
 
+  // Verify that the schoolId in token matches the student's schoolId
+  if (student.schoolId.toString() !== schoolId.toString()) {
+    throw new AuthenticationError("Unauthorized access to this institution.");
+  }
+
   // Update last login
   student.lastLogin = new Date();
   await student.save();
@@ -52,7 +94,7 @@ export const login = asyncHandler(async (req, res) => {
   const token = signToken({ 
     id: student._id.toString(), 
     role: "student",
-    schoolId: student.schoolId  // Assumes Student model has schoolId field
+    schoolId: student.schoolId.toString() // Ensure string format
   });
 
   // Set HTTP-only cookie for browser requests (for downloads etc.)
@@ -63,9 +105,19 @@ export const login = asyncHandler(async (req, res) => {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
+  console.log("🔐 Student login successful:", {
+    studentID: student.studentID,
+    schoolId: student.schoolId,
+    className: student.className,
+    section: student.section,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
+  });
+
   return successResponse(res, "Login successful", {
     token,
     role: "student",
+    schoolId: student.schoolId,
     student: safeStudent(student),
   });
 });
@@ -74,13 +126,14 @@ export const login = asyncHandler(async (req, res) => {
 export const getProfile = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   })
     .select('-password')
-    .populate('class', 'className sections');
+    .populate('class', 'className sections')
+    .populate('parent', 'name parentID phone email');
   
   if (!student) {
-    throw new NotFoundError("Student not found");
+    throw new NotFoundError("Student not found in this institution");
   }
 
   return successResponse(res, "Profile retrieved successfully", {
@@ -92,11 +145,11 @@ export const getProfile = asyncHandler(async (req, res) => {
 export const updateProfile = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   });
 
   if (!student) {
-    throw new NotFoundError("Student not found");
+    throw new NotFoundError("Student not found in this institution");
   }
 
   const {
@@ -147,6 +200,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
   // Handle photo upload
   if (req.file) {
     student.profilePicture = req.file.filename;
+    console.log("✅ Student profile picture uploaded:", req.file.filename);
   }
 
   await student.save();
@@ -170,11 +224,11 @@ export const changePassword = asyncHandler(async (req, res) => {
 
   const student = await Student.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
+    schoolId: req.schoolId // ✅ Verify school match
   }).select("+password");
 
   if (!student) {
-    throw new NotFoundError("Student not found");
+    throw new NotFoundError("Student not found in this institution");
   }
 
   const isMatch = await bcrypt.compare(currentPassword, student.password);
@@ -186,11 +240,24 @@ export const changePassword = asyncHandler(async (req, res) => {
   student.password = await bcrypt.hash(newPassword, 10);
   await student.save();
 
+  console.log("🔑 Password changed for student:", {
+    studentID: student.studentID,
+    schoolId: student.schoolId,
+    className: student.className,
+    timestamp: new Date().toISOString()
+  });
+
   return successResponse(res, "Password changed successfully");
 });
 
 // ✅ LOGOUT
 export const logout = asyncHandler(async (req, res) => {
+  console.log("🔓 Student logout:", {
+    studentId: req.user?.id,
+    schoolId: req.schoolId,
+    timestamp: new Date().toISOString()
+  });
+  
   // Clear student cookie on logout
   res.clearCookie("studentToken", {
     httpOnly: true,
@@ -205,15 +272,51 @@ export const logout = asyncHandler(async (req, res) => {
 export const validateToken = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: req.user.id,
-    schoolId: req.schoolId
-  }).select('-password');
+    schoolId: req.schoolId // ✅ Verify school match
+  })
+    .select('-password')
+    .populate('class', 'className sections')
+    .populate('parent', 'name parentID');
   
   if (!student) {
-    throw new NotFoundError("Student not found");
+    throw new NotFoundError("Student not found in this institution");
   }
   
   return successResponse(res, "Token is valid", {
     student: safeStudent(student)
+  });
+});
+
+// ✅ Additional security helper (optional)
+export const checkStudentSchoolAccess = asyncHandler(async (req, res, next) => {
+  // Middleware to verify student has access to requested school
+  const requestedSchoolId = req.params.schoolId || req.body.schoolId;
+  
+  if (requestedSchoolId && requestedSchoolId.toString() !== req.schoolId.toString()) {
+    throw new AuthenticationError("Access denied to this institution");
+  }
+  
+  next();
+});
+
+// ✅ Get student by ID (for admin/teacher use, with school verification)
+export const getStudentById = asyncHandler(async (req, res) => {
+  const { studentId } = req.params;
+  
+  const student = await Student.findOne({
+    _id: studentId,
+    schoolId: req.schoolId // ✅ Ensure student belongs to same school
+  })
+    .select('-password')
+    .populate('class', 'className sections')
+    .populate('parent', 'name parentID phone email');
+  
+  if (!student) {
+    throw new NotFoundError("Student not found in this institution");
+  }
+  
+  return successResponse(res, "Student retrieved successfully", {
+    student: safeStudent(student),
   });
 });
 
@@ -224,4 +327,6 @@ export default {
   changePassword,
   logout,
   validateToken,
+  checkStudentSchoolAccess,
+  getStudentById
 };

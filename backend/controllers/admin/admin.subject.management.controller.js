@@ -69,30 +69,44 @@ export const getSubjectsByClass = asyncHandler(async (req, res) => {
     throw new NotFoundError('Class');
   }
 
-  // LOGIC FIX: Instead of just section subjects, we can now also rely on 
-  // the 'commonSubjects' array defined in the Class Model if necessary,
-  // but to be safe, we pull all unique subjects currently existing in THIS class.
+  /**
+   * 🎯 MASTER POOL LOGIC
+   * We want to show a unique list of subjects that belong to this class.
+   * We combine 'commonSubjects' (the master list) with any unique subjects 
+   * found in specific sections to ensure nothing is missed.
+   */
   const subjectsMap = new Map();
-  
-  // Also check if this is 11-12 to ensure stream-specific subjects are handled
+
+  // 1. Add subjects from the Class Master Pool (commonSubjects)
+  if (classData.commonSubjects && Array.isArray(classData.commonSubjects)) {
+    classData.commonSubjects.forEach(subName => {
+      subjectsMap.set(subName.toUpperCase(), {
+        subjectName: subName,
+        isMaster: true // Flag to show this is part of the class group
+      });
+    });
+  }
+
+  // 2. Scan sections to populate details (Marks, Codes, etc.) for those subjects
   classData.sections.forEach(sec => {
     if (sec.subjects && Array.isArray(sec.subjects)) {
       sec.subjects.forEach(sub => {
-        const key = `${sub.subjectName}_${sub.subjectCode || ''}`;
-        if (!subjectsMap.has(key)) {
-          subjectsMap.set(key, {
-            _id: sub._id,
-            subjectName: sub.subjectName,
-            subjectCode: sub.subjectCode,
-            hasTheory: sub.hasTheory,
-            hasPractical: sub.hasPractical,
-            hasIA: sub.hasIA,
-            theoryMaxMarks: sub.theoryMaxMarks,
-            practicalMaxMarks: sub.practicalMaxMarks,
-            iaMaxMarks: sub.iaMaxMarks,
-            isCore: sub.isCore !== false
-          });
-        }
+        const key = sub.subjectName.toUpperCase();
+        
+        // Update the map with full details if they exist in a section
+        subjectsMap.set(key, {
+          _id: sub._id,
+          subjectName: sub.subjectName,
+          subjectCode: sub.subjectCode || '',
+          hasTheory: sub.hasTheory,
+          hasPractical: sub.hasPractical,
+          hasIA: sub.hasIA,
+          theoryMaxMarks: sub.theoryMaxMarks,
+          practicalMaxMarks: sub.practicalMaxMarks,
+          iaMaxMarks: sub.iaMaxMarks,
+          isCore: sub.isCore !== false,
+          isMaster: true
+        });
       });
     }
   });
@@ -103,17 +117,20 @@ export const getSubjectsByClass = asyncHandler(async (req, res) => {
     className: classData.className,
     classId: classData._id,
     academicYear: classData.academicYear,
+    // 🔥 This is your "Group" view
+    classMasterPool: classData.commonSubjects || [], 
+    // 🔥 This is your "Available Subjects" with full metadata for the UI
+    availableSubjects: availableSubjects,
+    // 📊 Section-wise breakdown for teacher assignments
     sections: classData.sections.map(sec => ({
       sectionName: sec.sectionName,
       subjects: sec.subjects || []
-    })),
-    availableSubjects: availableSubjects // If empty, use "Add Subject" to populate
+    }))
   });
 });
 
-
 export const addSubjectToClass = asyncHandler(async (req, res) => {
-  const { classId, sectionName, subject } = req.body;
+  const { classId, subject } = req.body;
 
   if (!classId || !subject || !subject.subjectName) {
     throw new ValidationError('Class ID and Subject Name are required');
@@ -122,44 +139,31 @@ export const addSubjectToClass = asyncHandler(async (req, res) => {
   const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
   if (!classData) throw new NotFoundError('Class');
 
-  // FIND OR CREATE SECTION logic to prevent 400 error in manually created classes
-  let section = classData.sections.find(s => s.sectionName === sectionName);
+  // 🔥 MASTER POOL LOGIC: 
+  // We strictly add it to the commonSubjects array only.
+  const subjectNameUpper = subject.subjectName.trim().toUpperCase();
   
-  if (!section) {
-    // If Admin tries to add a subject but section doesn't exist, create it on the fly
-    classData.sections.push({
-      sectionName: sectionName || "A",
-      capacity: 40,
-      currentStrength: 0,
-      subjects: []
-    });
-    section = classData.sections[classData.sections.length - 1];
+  // Check if already in commonSubjects
+  const isDuplicate = classData.commonSubjects.some(
+    s => s.toUpperCase() === subjectNameUpper
+  );
+
+  if (isDuplicate) {
+    throw new ValidationError(`Subject ${subject.subjectName} already exists in the Class Group`);
   }
 
-  const subjectExists = section.subjects.some(s => s.subjectName === subject.subjectName);
-  if (subjectExists) {
-    throw new ValidationError(`Subject ${subject.subjectName} already exists in this section`);
-  }
+  // 1. Only add to the Master Array
+  classData.commonSubjects.push(subject.subjectName.trim());
 
-  // Build payload strictly following your Class Model Schema
-  const newSubject = {
-    schoolId: req.schoolId, // Required by subjectSchema in models/Class.js
-    subjectName: subject.subjectName,
-    subjectCode: subject.subjectCode || '',
-    isCore: subject.isCore !== false,
-    hasTheory: true,
-    hasPractical: false,
-    hasIA: true,
-    theoryMaxMarks: 100,
-    practicalMaxMarks: 0,
-    iaMaxMarks: 20,
-    hoursPerWeek: 5
-  };
-
-  section.subjects.push(newSubject);
+  // ❌ REMOVED: The loop that was pushing to all sections
+  
   await classData.save();
 
-  return successResponse(res, 'Subject added successfully', newSubject, 201);
+  return successResponse(res, 'Subject added to Class Master Pool only', {
+    subjectName: subject.subjectName,
+    className: classData.className,
+    totalInPool: classData.commonSubjects.length
+  }, 201);
 });
 
 // Add subject to multiple sections - MULTI-TENANT
@@ -414,6 +418,42 @@ export const getSubjectStatistics = asyncHandler(async (req, res) => {
   });
 });
 
+// ✅ NEW: Remove subject from Class Master Pool - MULTI-TENANT
+export const removeSubjectFromMasterPool = asyncHandler(async (req, res) => {
+  const { classId, subjectName } = req.body;
+
+  if (!classId || !subjectName) {
+    throw new ValidationError('Class ID and Subject Name are required');
+  }
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  // 1. Remove from commonSubjects array
+  const initialLength = classData.commonSubjects.length;
+  classData.commonSubjects = classData.commonSubjects.filter(
+    s => s.toLowerCase() !== subjectName.toLowerCase()
+  );
+
+  if (classData.commonSubjects.length === initialLength) {
+    throw new NotFoundError('Subject not found in Master Pool');
+  }
+
+  // 2. Cleanup: Remove this subject from ALL sections in this class automatically
+  classData.sections.forEach(section => {
+    section.subjects = section.subjects.filter(
+      s => s.subjectName.toLowerCase() !== subjectName.toLowerCase()
+    );
+  });
+
+  await classData.save();
+
+  return successResponse(res, 'Subject removed from Master Pool and all Sections', {
+    removedSubject: subjectName,
+    remainingCount: classData.commonSubjects.length
+  });
+});
+
 export default {
   getAllSubjects,
   getSubjectsByClass,
@@ -422,5 +462,6 @@ export default {
   updateSubject,
   removeSubject,
   removeSubjectFromSections,
-  getSubjectStatistics
+  getSubjectStatistics,
+  removeSubjectFromMasterPool
 };

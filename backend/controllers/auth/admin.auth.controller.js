@@ -20,17 +20,21 @@ function safeAdmin(admin) {
 
 // POST /api/auth/admin/login - MULTI-TENANT
 export const login = asyncHandler(async (req, res) => {
-  const { adminID, password } = req.body || {};
+  // ✅ FIX: Extract schoolId from request body - REQUIRED for tenant isolation
+  const { adminID, password, schoolId } = req.body || {};
   
-  if (!adminID || !password) {
-    throw new ValidationError("adminID and password are required");
+  if (!adminID || !password || !schoolId) {
+    throw new ValidationError("adminID, password, and schoolId are required");
   }
 
-  // ✅ MULTI-TENANT: Find admin by adminID (unique across platform)
-  const admin = await Admin.findOne({ adminID }).select("+password").lean();
+  // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
+  const admin = await Admin.findOne({ 
+    adminID, 
+    schoolId // This ensures admin can only login to their own school
+  }).select("+password").lean();
   
   if (!admin) {
-    throw new AuthenticationError("Invalid credentials");
+    throw new AuthenticationError("Invalid credentials for this institution.");
   }
 
   if (!admin.isActive) {
@@ -43,6 +47,11 @@ export const login = asyncHandler(async (req, res) => {
     throw new AuthenticationError("Invalid credentials");
   }
 
+  // Verify that the schoolId in token matches the admin's schoolId
+  if (admin.schoolId.toString() !== schoolId.toString()) {
+    throw new AuthenticationError("Unauthorized access to this institution.");
+  }
+
   // Update last login
   await Admin.findByIdAndUpdate(admin._id, { lastLogin: new Date() });
 
@@ -50,14 +59,16 @@ export const login = asyncHandler(async (req, res) => {
   const token = signToken({ 
     id: admin._id.toString(), 
     role: "admin", 
-    schoolId: admin.schoolId,
+    schoolId: admin.schoolId.toString(), // Ensure string format
     isSuperAdmin: admin.isSuperAdmin || false
   });
 
   console.log("🔐 Admin login successful:", {
     adminID: admin.adminID,
     schoolId: admin.schoolId,
-    isSuperAdmin: admin.isSuperAdmin
+    isSuperAdmin: admin.isSuperAdmin,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
   });
 
   return successResponse(
@@ -66,6 +77,7 @@ export const login = asyncHandler(async (req, res) => {
     {
       token,
       role: "admin",
+      schoolId: admin.schoolId,
       admin: safeAdmin(admin),
     }
   );
@@ -80,11 +92,12 @@ export const validate = asyncHandler(async (req, res) => {
   });
   
   if (!admin) {
-    throw new NotFoundError("Admin");
+    throw new NotFoundError("Admin not found in this institution");
   }
 
   return successResponse(res, "Token valid", { 
     role: "admin",
+    schoolId: admin.schoolId,
     admin: safeAdmin(admin)
   });
 });
@@ -98,7 +111,7 @@ export const profile = asyncHandler(async (req, res) => {
   });
   
   if (!admin) {
-    throw new NotFoundError("Admin");
+    throw new NotFoundError("Admin not found in this institution");
   }
   
   return successResponse(res, "Profile retrieved successfully", { 
@@ -133,7 +146,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
   );
   
   if (!updatedAdmin) {
-    throw new NotFoundError("Admin");
+    throw new NotFoundError("Admin not found in this institution");
   }
 
   return successResponse(res, "Profile updated successfully", { 
@@ -160,7 +173,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   }).select("+password");
   
   if (!admin) {
-    throw new NotFoundError("Admin");
+    throw new NotFoundError("Admin not found in this institution");
   }
 
   const isMatch = await bcrypt.compare(currentPassword, admin.password);
@@ -172,13 +185,37 @@ export const changePassword = asyncHandler(async (req, res) => {
   admin.password = await bcrypt.hash(newPassword, 10);
   await admin.save();
 
+  console.log("🔑 Password changed for admin:", {
+    adminID: admin.adminID,
+    schoolId: admin.schoolId,
+    timestamp: new Date().toISOString()
+  });
+
   return successResponse(res, "Password changed successfully");
 });
 
 // POST /api/auth/admin/logout
 export const logout = asyncHandler(async (req, res) => {
   // JWT is stateless, so logout is handled client-side
+  console.log("🔓 Admin logout:", {
+    adminId: req.user?.id,
+    schoolId: req.schoolId,
+    timestamp: new Date().toISOString()
+  });
+  
   return successResponse(res, "Logged out successfully");
+});
+
+// Additional security helper function (optional)
+export const checkSchoolAccess = asyncHandler(async (req, res, next) => {
+  // Middleware to verify admin has access to requested school
+  const requestedSchoolId = req.params.schoolId || req.body.schoolId;
+  
+  if (requestedSchoolId && requestedSchoolId.toString() !== req.schoolId.toString()) {
+    throw new AuthenticationError("Access denied to this institution");
+  }
+  
+  next();
 });
 
 export default {
@@ -187,5 +224,6 @@ export default {
   profile,
   updateProfile,
   changePassword,
-  logout
+  logout,
+  checkSchoolAccess
 };

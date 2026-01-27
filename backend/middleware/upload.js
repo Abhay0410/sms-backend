@@ -6,24 +6,29 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure all required uploads directories exist
+// Helper function to ensure school-specific directory exists
+const ensureSchoolDir = (schoolId, subFolder) => {
+  const rootDir = path.join(__dirname, "../uploads");
+  const schoolDir = path.join(rootDir, schoolId.toString());
+  const finalPath = path.join(schoolDir, subFolder);
+
+  if (!fs.existsSync(finalPath)) {
+    fs.mkdirSync(finalPath, { recursive: true });
+    console.log(`✅ Created tenant directory: ${finalPath}`);
+  }
+  return finalPath;
+};
+
+// Ensure base required uploads directories exist
 const createUploadDirs = () => {
   const dirs = [
     path.join(__dirname, "../uploads"),
-    path.join(__dirname, "../uploads/students"),
-    path.join(__dirname, "../uploads/teachers"),
-    path.join(__dirname, "../uploads/parents"),
-    path.join(__dirname, "../uploads/admin"),
-    path.join(__dirname, "../uploads/announcements"),
-    path.join(__dirname, "../uploads/messages"), // ✅ Dedicated folder for T-S-P messages
-    path.join(__dirname, "../uploads/results"),
-    path.join(__dirname, "../uploads/documents"),
   ];
 
   dirs.forEach((dir) => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
-      console.log(`✅ Created directory: ${dir}`);
+      console.log(`✅ Created base directory: ${dir}`);
     }
   });
 };
@@ -55,11 +60,13 @@ const documentFilter = (req, file, cb) => {
 // STORAGE CONFIGURATIONS
 // ========================================
 
-// Profile Storage
+// Profile Storage ✅ UPDATED FOR MULTI-TENANCY
 const profileStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let roleFolder = req.user?.role ? `${req.user.role}s` : "students";
-    cb(null, path.join(__dirname, `../uploads/${roleFolder}`));
+    const schoolId = req.schoolId || "generic";
+    const roleFolder = req.user?.role ? `${req.user.role}s` : "students";
+    const uploadPath = ensureSchoolDir(schoolId, roleFolder);
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -67,10 +74,12 @@ const profileStorage = multer.diskStorage({
   },
 });
 
-// Message Attachments Storage ✅ NEW
+// Message Attachments Storage ✅ UPDATED FOR MULTI-TENANCY
 const messageStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../uploads/messages"));
+    const schoolId = req.schoolId || "generic";
+    const uploadPath = ensureSchoolDir(schoolId, "messages");
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -79,10 +88,12 @@ const messageStorage = multer.diskStorage({
   },
 });
 
-// Announcement Storage
+// Announcement Storage ✅ UPDATED FOR MULTI-TENANCY
 const announcementStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../uploads/announcements"));
+    const schoolId = req.schoolId || "generic";
+    const uploadPath = ensureSchoolDir(schoolId, "announcements");
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -107,7 +118,6 @@ export const uploadAnnouncementAttachments = multer({
   fileFilter: documentFilter,
 });
 
-// ✅ Export the instance used in teacher.message.routes.js
 export const uploadMessageAttachments = multer({
   storage: messageStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
@@ -116,7 +126,11 @@ export const uploadMessageAttachments = multer({
 
 export const uploadDocuments = multer({
   storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(__dirname, "../uploads/documents")),
+    destination: (req, file, cb) => {
+      const schoolId = req.schoolId || "generic";
+      const uploadPath = ensureSchoolDir(schoolId, "documents");
+      cb(null, uploadPath);
+    },
     filename: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
       cb(null, `doc-${uniqueSuffix}${path.extname(file.originalname)}`);
@@ -128,7 +142,11 @@ export const uploadDocuments = multer({
 
 export const uploadResultPDF = multer({
   storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(__dirname, "../uploads/results")),
+    destination: (req, file, cb) => {
+      const schoolId = req.schoolId || "generic";
+      const uploadPath = ensureSchoolDir(schoolId, "results");
+      cb(null, uploadPath);
+    },
     filename: (req, file, cb) => cb(null, `result-${Date.now()}.pdf`),
   }),
   limits: { fileSize: 5 * 1024 * 1024 },

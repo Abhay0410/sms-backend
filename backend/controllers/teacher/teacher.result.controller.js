@@ -106,7 +106,8 @@ export const getStudentsForResult = asyncHandler(async (req, res) => {
   });
 });
 
-// Create result - MULTI-TENANT
+
+// Create result - MULTI-TENANT with enhanced permission checks
 export const createResult = asyncHandler(async (req, res) => {
   const teacherId = req.user.id;
   const { 
@@ -121,7 +122,8 @@ export const createResult = asyncHandler(async (req, res) => {
     subjects,
     totalWorkingDays,
     daysPresent,
-    remarks 
+    remarks,
+    rollNumber: bodyRollNumber // Extract rollNumber from body if provided
   } = req.body;
 
   console.log("📝 Creating result for student:", studentId);
@@ -148,34 +150,38 @@ export const createResult = asyncHandler(async (req, res) => {
   if (!student) throw new NotFoundError("Student");
   if (!teacher) throw new NotFoundError("Teacher");
 
-  // 🔒 Ensure this teacher is class teacher of this class + section
+  // 🔥 FIX: Robust Section Matching with Multi-Tenant
   const cls = await Class.findOne({
     _id: classId,
     schoolId: req.schoolId  // ✅ MULTI-TENANT
-  }).select("className sections");
+  });
   
   if (!cls) {
     throw new NotFoundError("Class");
   }
 
-  const targetSection = cls.sections.find(
-    (sec) =>
-      sec.sectionName === section ||
-      sec._id?.toString() === section?.toString()
+  // 🔥 FIX: Robust Section Matching
+  // Some students have section as "A", others might have the ObjectId string. 
+  // We check both.
+  const targetSection = cls.sections.find(sec => 
+    sec.sectionName === section || sec._id?.toString() === section?.toString()
   );
 
   if (!targetSection) {
-    throw new ValidationError("Invalid section for this class");
+    throw new ValidationError(`Section '${section}' not found in class ${cls.className}`);
   }
 
-  const isClassTeacher =
-    targetSection.classTeacher &&
-    targetSection.classTeacher.toString() === teacherId.toString();
+  // 🔥 FIX: Permission Check - Enhanced
+  // Ensure the teacher is either the Class Teacher OR teaches one of the subjects
+  const isClassTeacher = targetSection.classTeacher?.toString() === teacherId.toString();
+  
+  // Check if teacher teaches any subject in this section
+  const teachesSubject = targetSection.subjects?.some(subject => 
+    subject.teacher?.toString() === teacherId.toString()
+  );
 
-  if (!isClassTeacher) {
-    throw new ForbiddenError(
-      "Only the class teacher can create results for this class and section"
-    );
+  if (!isClassTeacher && !teachesSubject) {
+    throw new ForbiddenError("You are not authorized to create results for this section. Only class teachers or subject teachers can create results.");
   }
 
   // Check if result already exists for this exam
@@ -299,11 +305,14 @@ export const createResult = asyncHandler(async (req, res) => {
   }
 
   const result = new Result({
-    schoolId: req.schoolId,  // ✅ MULTI-TENANT
+    schoolId: req.schoolId,
     student: studentId,
     studentName: student.name,
     studentID: student.studentID,
-    rollNumber: student.rollNumber,
+    
+    // 🔥 FIX: Provide a fallback for rollNumber to satisfy Mongoose 'required' validation
+    rollNumber: student.rollNumber ||  0, 
+    
     fatherName: student.fatherName,
     motherName: student.motherName,
     dob: student.dateOfBirth,

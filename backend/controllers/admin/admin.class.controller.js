@@ -157,7 +157,7 @@ export const deleteClass = asyncHandler(async (req, res) => {
   return successResponse(res, 'Class deleted successfully');
 });
 
-// Assign students to section
+
 export const assignStudentsToSection = asyncHandler(async (req, res) => {
   const { classId, sectionName } = req.params;
   const { studentIds } = req.body;
@@ -166,35 +166,48 @@ export const assignStudentsToSection = asyncHandler(async (req, res) => {
   if (!classData) throw new NotFoundError('Class');
 
   const targetSection = classData.sections.find(s => s.sectionName === sectionName);
-  if (!targetSection) throw new NotFoundError('Section');
+  if (!targetSection) throw new NotFoundError('Target Section');
+
+  // 🔥 1. Calculate the starting point for roll numbers in this section
+  const lastStudent = await Student.findOne({ 
+    schoolId: req.schoolId,
+    class: classId,
+    section: sectionName 
+  })
+  .sort({ rollNumber: -1 }) 
+  .select('rollNumber');
+
+  let nextRollNumber = lastStudent && lastStudent.rollNumber ? lastStudent.rollNumber + 1 : 1;
+  const startingRollNumber = nextRollNumber;
 
   const updatePromises = studentIds.map(async (studentId) => {
     const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
     if (!student) return null;
 
-    const oldSectionName = student.section;
-
-    // SCENARIO 1: Student is already in the target section - Do nothing
-    if (oldSectionName === sectionName) return student;
-
-    // SCENARIO 2: Student is shifting from one section to another in the same class
-    if (oldSectionName && oldSectionName !== "") {
-      const oldSection = classData.sections.find(s => s.sectionName === oldSectionName);
-      if (oldSection) {
-        oldSection.currentStrength = Math.max(0, oldSection.currentStrength - 1);
+    // Handle section strength logic (Old section decrement)
+    if (student.section && student.section !== sectionName) {
+      const oldSection = classData.sections.find(s => s.sectionName === student.section);
+      if (oldSection && oldSection.currentStrength > 0) {
+        oldSection.currentStrength -= 1;
       }
-      targetSection.currentStrength += 1;
-    } 
-    // SCENARIO 3: Student is new (REGISTERED but not yet in any section)
-    else {
+    }
+
+    if (student.section !== sectionName) {
       targetSection.currentStrength += 1;
     }
 
-    // Standardize student record
     student.class = classId;
     student.className = classData.className;
     student.section = sectionName;
-    student.status = 'ENROLLED'; // Fixes the "Registration Pending" issue
+    student.status = 'ENROLLED';
+
+    // 🔥 2. Assign Numeric Roll Number (Avoids "N/A" Cast Error)
+    // Only assign if the student doesn't have one or is moving to a new section
+    if (!student.rollNumber || student.section !== sectionName) {
+        student.rollNumber = nextRollNumber;
+        nextRollNumber++; 
+    }
+
     await student.save();
     return student;
   });
@@ -202,7 +215,11 @@ export const assignStudentsToSection = asyncHandler(async (req, res) => {
   await Promise.all(updatePromises);
   await classData.save();
 
-  return successResponse(res, `Enrolled/Shifted successfully`, classData);
+  return successResponse(
+    res, 
+    `Enrolled successfully. Roll numbers assigned from ${startingRollNumber}`, 
+    classData
+  );
 });
 
 // Promote students - MULTI-TENANT

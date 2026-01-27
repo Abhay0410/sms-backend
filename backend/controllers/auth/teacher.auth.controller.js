@@ -24,16 +24,21 @@ function safeTeacher(teacher) {
 
 // POST /api/auth/teacher/login - MULTI-TENANT
 export const login = asyncHandler(async (req, res) => {
-  const { teacherID, password } = req.body || {};
+  // ✅ FIX: Extract schoolId from request body - REQUIRED for tenant isolation
+  const { teacherID, password, schoolId } = req.body || {};
 
-  if (!teacherID || !password) {
-    throw new ValidationError("teacherID and password are required");
+  if (!teacherID || !password || !schoolId) {
+    throw new ValidationError("teacherID, password, and schoolId are required");
   }
 
-  const teacher = await Teacher.findOne({ teacherID }).select("+password");
+  // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
+  const teacher = await Teacher.findOne({ 
+    teacherID, 
+    schoolId // This ensures teacher can only login to their own school
+  }).select("+password");
   
   if (!teacher) {
-    throw new AuthenticationError("Invalid credentials");
+    throw new AuthenticationError("Invalid credentials for this institution.");
   }
 
   if (!teacher.isActive) {
@@ -46,6 +51,11 @@ export const login = asyncHandler(async (req, res) => {
     throw new AuthenticationError("Invalid credentials");
   }
 
+  // Verify that the schoolId in token matches the teacher's schoolId
+  if (teacher.schoolId.toString() !== schoolId.toString()) {
+    throw new AuthenticationError("Unauthorized access to this institution.");
+  }
+
   // Update last login
   teacher.lastLogin = new Date();
   await teacher.save();
@@ -54,18 +64,18 @@ export const login = asyncHandler(async (req, res) => {
   const tokenPayload = { 
     id: teacher._id.toString(), 
     role: "teacher",
-    schoolId: teacher.schoolId,  // ✅ CRITICAL
-    isSuperAdmin: teacher.isSuperAdmin || false  // ✅ For teacher super-admins if needed
+    schoolId: teacher.schoolId.toString(),  // ✅ Ensure string format
+    isSuperAdmin: teacher.isSuperAdmin || false
   };
   
-  console.log("🔐 Teacher Login - Generating Token:");
-  console.log("  Teacher ID:", teacher._id.toString());
-  console.log("  School ID:", teacher.schoolId);
-  console.log("  Payload:", tokenPayload);
+  console.log("🔐 Teacher login successful:", {
+    teacherID: teacher.teacherID,
+    schoolId: teacher.schoolId,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
+  });
   
   const token = signToken(tokenPayload);
-  
-  console.log("  Token generated:", token.substring(0, 50) + "...");
 
   return successResponse(
     res,
@@ -73,6 +83,7 @@ export const login = asyncHandler(async (req, res) => {
     {
       token,
       role: "teacher",
+      schoolId: teacher.schoolId,
       teacher: safeTeacher(teacher),
     }
   );
@@ -86,11 +97,12 @@ export const validate = asyncHandler(async (req, res) => {
   }).populate('assignedClasses.class', 'className sections');
   
   if (!teacher) {
-    throw new NotFoundError("Teacher");
+    throw new NotFoundError("Teacher not found in this institution");
   }
 
   return successResponse(res, "Token valid", { 
     role: "teacher",
+    schoolId: teacher.schoolId,
     teacher: safeTeacher(teacher)
   });
 });
@@ -103,7 +115,7 @@ export const profile = asyncHandler(async (req, res) => {
   }).populate('assignedClasses.class', 'className sections');
   
   if (!teacher) {
-    throw new NotFoundError("Teacher");
+    throw new NotFoundError("Teacher not found in this institution");
   }
   
   return successResponse(res, "Profile retrieved successfully", { 
@@ -113,13 +125,12 @@ export const profile = asyncHandler(async (req, res) => {
 
 // PUT /api/auth/teacher/profile - MULTI-TENANT
 export const updateProfile = asyncHandler(async (req, res) => {
-  // ✅ 1. Add 'department' to allowedFields
   const allowedFields = ["name", "phone", "address", "gender", "dateOfBirth", "department", "subjects"];
   const updates = {};
 
   for (const key of allowedFields) {
     if (key in req.body) {
-      // ✅ 2. Convert comma-separated subjects string to Array
+      // ✅ Convert comma-separated subjects string to Array
       if (key === 'subjects' && typeof req.body[key] === 'string') {
         updates[key] = req.body[key].split(',').map(s => s.trim()).filter(Boolean);
       } else {
@@ -136,14 +147,14 @@ export const updateProfile = asyncHandler(async (req, res) => {
   const updatedTeacher = await Teacher.findOneAndUpdate(
     { 
       _id: req.user.id, 
-      schoolId: req.schoolId 
+      schoolId: req.schoolId  // ✅ Verify school match
     },
     updates, 
     { new: true, runValidators: true }
   ).populate('assignedClasses.class', 'className sections');
   
   if (!updatedTeacher) {
-    throw new NotFoundError("Teacher");
+    throw new NotFoundError("Teacher not found in this institution");
   }
 
   return successResponse(res, "Profile updated successfully", { 
@@ -169,7 +180,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   }).select("+password");
   
   if (!teacher) {
-    throw new NotFoundError("Teacher");
+    throw new NotFoundError("Teacher not found in this institution");
   }
 
   const isMatch = await bcrypt.compare(currentPassword, teacher.password);
@@ -181,12 +192,36 @@ export const changePassword = asyncHandler(async (req, res) => {
   teacher.password = await bcrypt.hash(newPassword, 10);
   await teacher.save();
 
+  console.log("🔑 Password changed for teacher:", {
+    teacherID: teacher.teacherID,
+    schoolId: teacher.schoolId,
+    timestamp: new Date().toISOString()
+  });
+
   return successResponse(res, "Password changed successfully");
 });
 
 // POST /api/auth/teacher/logout
 export const logout = asyncHandler(async (req, res) => {
+  console.log("🔓 Teacher logout:", {
+    teacherId: req.user?.id,
+    schoolId: req.schoolId,
+    timestamp: new Date().toISOString()
+  });
+  
   return successResponse(res, "Logged out successfully");
+});
+
+// Additional security helper function (optional)
+export const checkTeacherSchoolAccess = asyncHandler(async (req, res, next) => {
+  // Middleware to verify teacher has access to requested school
+  const requestedSchoolId = req.params.schoolId || req.body.schoolId;
+  
+  if (requestedSchoolId && requestedSchoolId.toString() !== req.schoolId.toString()) {
+    throw new AuthenticationError("Access denied to this institution");
+  }
+  
+  next();
 });
 
 export default {
@@ -195,5 +230,6 @@ export default {
   profile,
   updateProfile,
   changePassword,
-  logout
+  logout,
+  checkTeacherSchoolAccess
 };

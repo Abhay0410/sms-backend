@@ -1,31 +1,53 @@
-import { Router } from "express";
-import { requireAuth } from "../../middleware/auth.js";
-import { generateMonthlyPayroll } from "../../controllers/admin/admin.payroll.controller.js";
-import { getMonthlyPayroll, markPayrollPaid, getTeacherPayrollHistory, deleteDraftPayroll ,updateTeacherSalary, updatePayroll } from "../../controllers/admin/admin.payroll.controller.js";
-
+// routes/admin.payroll.routes.js
+import { Router } from 'express';
+import { 
+  calculateAndSetSalary, 
+  getAttendanceStats, 
+  runMonthlyPayroll,
+  getUnifiedStaffList,
+  getPayrollSummary,
+  getPayrollStructure,
+  markPayrollPaid,
+  getMonthlyPayroll,
+  deleteDraftPayroll,
+  updateTeacherSalary,
+  updatePayroll,
+  getTeacherPayrollHistory,
+  generateMonthlyPayroll,
+  getPayrollDetails
+} from '../../controllers/admin/admin.payroll.controller.js';
+import { requireAuth } from '../../middleware/auth.js';
 
 const router = Router();
 
+// 1. Specific Static Routes FIRST
+router.get('/attendance-stats', requireAuth(['admin']), getAttendanceStats);
+router.get('/staff-list', requireAuth(['admin']), getUnifiedStaffList);
+router.get('/summary', requireAuth(['admin']), getPayrollSummary);
 
+// 2. Generation Routes
+// ✅ Ensure this matches what the Frontend is calling via the Constant
+router.post('/run-payroll', requireAuth(['admin']), runMonthlyPayroll); 
 
+// Standard bulk generate
+router.post('/generate', requireAuth(['admin']), generateMonthlyPayroll);
 
-// Payroll Engine
-// router.post("/payroll/generate", requireAuth(["admin"]), generateMonthlyPayroll);
-router.post('/payroll/generate', requireAuth(["admin"]), generateMonthlyPayroll);
-router.get('/payroll', requireAuth(["admin"]), getMonthlyPayroll);
-router.patch('/payroll/:payrollId/pay', requireAuth(["admin"]), markPayrollPaid);
-router.get('/teacher/:teacherId',requireAuth(["admin"]), getTeacherPayrollHistory);
-router.delete('/delete/payroll/:payrollId', requireAuth(["admin"]), deleteDraftPayroll);
-router.patch(
-  "/teachers/:teacherId/salary",
-  requireAuth(["admin"]),
-  updateTeacherSalary
-);
+// 3. Structure Routes
+router.post('/setup-salary', requireAuth(['admin']), calculateAndSetSalary);
+router.post('/setup-structure', requireAuth(['admin']), calculateAndSetSalary);
+router.get('/structure/:teacherId', requireAuth(['admin']), getPayrollStructure);
+router.patch('/teachers/:teacherId/salary', requireAuth(['admin']), updateTeacherSalary);
 
-router.patch(
-  "/update/:id",
-  requireAuth(["admin"]),
-  updatePayroll
-);
+// 4. Other Specific Routes
+router.get('/teacher/:teacherId', requireAuth(['admin']), getTeacherPayrollHistory);
+router.get('/slip-details/:slipId', requireAuth(['admin', 'teacher']), getPayrollDetails);
+router.put('/mark-paid/:slipId', requireAuth(['admin']), markPayrollPaid);
+router.patch('/update/:id', requireAuth(['admin']), updatePayroll);
+router.delete('/delete/:payrollId', requireAuth(['admin']), deleteDraftPayroll);
+
+// 5. Dynamic/Generic Routes LAST
+router.get('/', requireAuth(['admin']), getMonthlyPayroll);
+router.patch('/:payrollId/pay', requireAuth(['admin']), markPayrollPaid);
+router.delete('/:payrollId', requireAuth(['admin']), deleteDraftPayroll);
 
 export default router;

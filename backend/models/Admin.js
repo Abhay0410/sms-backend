@@ -12,7 +12,6 @@ const adminSchema = new mongoose.Schema({
   adminID: { type: String, required: true, unique: true },
   phone: { type: String, required: true },
   
-
   dateOfBirth: Date,
   gender: { type: String, enum: ['Male', 'Female', 'Other'] },
 
@@ -28,6 +27,21 @@ const adminSchema = new mongoose.Schema({
   department: String,
   joiningDate: { type: Date, default: Date.now },
 
+  // ✅ NEW: Payroll & Compliance for Admin Staff
+  panNumber: { type: String, unique: true, sparse: true },
+  aadharNumber: { type: String, unique: true, sparse: true },
+  
+  salary: {
+    paymentMode: { type: String, enum: ['BANK', 'CASH', 'CHEQUE'], default: 'BANK' },
+    bankDetails: {
+      accountNumber: String,
+      ifscCode: String,
+      bankName: String,
+      accountHolderName: String
+    },
+    uanNumber: String, // PF UAN
+  },
+
   permissions: [{
     module: String,
     actions: [String]
@@ -35,17 +49,15 @@ const adminSchema = new mongoose.Schema({
 
   isSuperAdmin: { type: Boolean, default: false },
 
-profilePicture: { type: String, default: '' },
-profilePicturePublicId: { type: String, default: '' },
+  profilePicture: { type: String, default: '' },
+  profilePicturePublicId: { type: String, default: '' },
 
-role: { type: String, default: 'admin' },
-isActive: { type: Boolean, default: true },
+  role: { type: String, default: 'admin' },
+  isActive: { type: Boolean, default: true },
 
 }, { timestamps: true });
 
 adminSchema.index({ schoolId: 1 });
 adminSchema.index({ schoolId: 1, email: 1 });
-// adminSchema.index({ adminID: 1 });
-
 
 export default mongoose.model('Admin', adminSchema);

@@ -7,37 +7,6 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
 
-// Get all teachers (WITH ALIAS) - MULTI-TENANT
-// export const getAllTeachers = asyncHandler(async (req, res) => {
-//   const { page, limit, skip } = getPaginationParams(req);
-//   const { status, search, subject } = req.query;
-  
-//   const filter = { schoolId: req.schoolId }; // ✅ MULTI-TENANT
-  
-//   if (status) filter.status = status;
-//   if (subject) filter.subjects = subject;
-  
-//   if (search) {
-//     filter.$or = [
-//       { name: { $regex: search, $options: 'i' } },
-//       { teacherID: { $regex: search, $options: 'i' } },
-//       { email: { $regex: search, $options: 'i' } }
-//     ];
-//   }
-  
-//   const [teachers, total] = await Promise.all([
-//     Teacher.find(filter)
-//       .select('-password')
-//       .populate('assignedClasses.class', 'className')
-//       .sort({ teacherID: 1 })
-//       .skip(skip)
-//       .limit(limit),
-//     Teacher.countDocuments(filter)
-//   ]);
-  
-//   return paginatedResponse(res, 'Teachers retrieved successfully', teachers, page, limit, total);
-// });
-
 // Get all teachers (FRONTEND COMPATIBLE) - MULTI-TENANT
 export const getAllTeachers = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPaginationParams(req);
@@ -256,70 +225,7 @@ export const deleteTeacher = asyncHandler(async (req, res) => {
   
   return successResponse(res, 'Teacher deleted successfully');
 });
-
-// Assign class to teacher - MULTI-TENANT
-// export const assignClassToTeacher = asyncHandler(async (req, res) => {
-//   const { teacherId } = req.params;
-//   const { classId, section, subject, isClassTeacher } = req.body;
-  
-//   if (!classId || !section || !subject) {
-//     throw new ValidationError('Class, section, and subject are required');
-//   }
-  
-//   const teacher = await Teacher.findOne({
-//     _id: teacherId,
-//     schoolId: req.schoolId  // ✅ MULTI-TENANT
-//   });
-//   if (!teacher) {
-//     throw new NotFoundError('Teacher');
-//   }
-  
-//   const classData = await Class.findOne({
-//     _id: classId,
-//     schoolId: req.schoolId  // ✅ MULTI-TENANT
-//   });
-//   if (!classData) {
-//     throw new NotFoundError('Class');
-//   }
-  
-//   // Check if already assigned
-//   const alreadyAssigned = teacher.assignedClasses.some(
-//     ac => ac.class.toString() === classId && 
-//           ac.section === section && 
-//           ac.subject === subject
-//   );
-  
-//   if (alreadyAssigned) {
-//     throw new ValidationError('Teacher already assigned to this class and subject');
-//   }
-  
-//   // Add to teacher's assigned classes
-//   teacher.assignedClasses.push({
-//     class: classId,
-//     section,
-//     subject,
-//     isClassTeacher: isClassTeacher || false
-//   });
-  
-//   await teacher.save();
-  
-//   // Update class section with teacher assignment
-//   const sectionData = classData.sections.find(s => s.sectionName === section);
-//   if (sectionData) {
-//     const subjectData = sectionData.subjects.find(s => s.subjectName === subject);
-//     if (subjectData) {
-//       subjectData.teacher = teacherId;
-//     }
-    
-//     if (isClassTeacher) {
-//       sectionData.classTeacher = teacherId;
-//     }
-    
-//     await classData.save();
-//   }
-  
-//   return successResponse(res, 'Class assigned to teacher successfully', teacher);
-// });
+// Assign class teacher - MULTI-TENANT
 export const assignClassTeacher = asyncHandler(async (req, res) => {
   const { teacherId, classId, sectionName } = req.body;
 

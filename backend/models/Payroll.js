@@ -1,63 +1,50 @@
-// import mongoose from 'mongoose';
-
-// const payrollSchema = new mongoose.Schema({
-//   schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
-//   teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
-//   month: { type: Number, required: true }, // 1-12
-//   year: { type: Number, required: true },
-  
-//   // Breakup from Teacher Profile at the time of generation
-//   baseSalary: Number,
-//   allowances: Number,
-  
-//   // Deductions
-//   pensionContribution: { type: Number, default: 0 },
-//   unpaidLeaveDeduction: { type: Number, default: 0 },
-//   taxDeduction: { type: Number, default: 0 },
-  
-//   totalDeductions: Number,
-//   netSalary: Number,
-  
-//   status: { type: String, enum: ['DRAFT', 'PAID'], default: 'DRAFT' },
-//   paymentDate: Date,
-//   transactionId: String
-// }, { timestamps: true });
-
-// export default mongoose.model('Payroll', payrollSchema);
-
+//models/Payroll.js
 import mongoose from 'mongoose';
 
 const payrollSchema = new mongoose.Schema({
   schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
-  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
-  month: { type: Number, required: true },
-  year: { type: Number, required: true },
-
-  // Salary breakdown
-  baseSalary: { type: Number, default: 0 },
-  allowances: { type: Number, default: 0 },
-
-  // Deductions
-  pensionContribution: { type: Number, default: 0 },
-  unpaidLeaveDeduction: { type: Number, default: 0 },
-  taxDeduction: { type: Number, default: 0 },
-
-  totalDeductions: { type: Number, default: 0 },
-  netSalary: { type: Number, default: 0 },
-
-  status: { type: String, enum: ['DRAFT', 'PAID'], default: 'DRAFT' },
+  employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
+  month: { type: String }, // e.g., "JANUARY"
+  isTemplate: { type: Boolean, default: false },
+  year: { type: Number },  // 2026
+  
+  // Master Structure
+  ctc: { type: Number, required: true }, // Cost to Company
+  grossSalary: { type: Number, required: true },
+  
+  // Earnings Breakdown
+  earnings: {
+    basic: { type: Number, required: true }, // Should be 50% of Gross
+    da: { type: Number, default: 0 },
+    hra: { type: Number, default: 0 },
+    specialAllowance: { type: Number, default: 0 },
+    teachingAllowance: { type: Number, default: 0 }
+  },
+  
+  // Deductions Breakdown
+  deductions: {
+    epfEmployee: { type: Number, default: 0 }, // 12% of Basic + DA
+    professionalTax: { type: Number, default: 200 }, // PT as per State
+    tds: { type: Number, default: 0 }, // Income Tax
+    otherDeductions: { type: Number, default: 0 }
+  },
+  
+  // Statutory (Outside In-hand)
+  statutory: {
+    epfEmployer: { type: Number, default: 0 },
+    gratuityProvision: { type: Number, default: 0 } // Monthly provision
+  },
+  
+  // Payment Details
+  netSalary: { type: Number, required: true },
+  paymentStatus: { type: String, enum: ['PENDING', 'PAID'], default: 'PENDING' },
   paymentDate: Date,
-  transactionId: String
+  transactionId: String, // UTR Number
+  paymentMode: { type: String, enum: ['NEFT', 'IMPS', 'CASH', 'CHEQUE'] },
+  
+  // Context
+  taxRegime: { type: String, enum: ['OLD', 'NEW'], default: 'NEW' }, // 2026 Default
+  attendanceDays: { type: Number, default: 30 }
 }, { timestamps: true });
-
-// Auto-calculate total deductions and net salary before saving
-payrollSchema.pre('save', function(next) {
-  this.totalDeductions = (this.pensionContribution || 0) 
-                       + (this.unpaidLeaveDeduction || 0) 
-                       + (this.taxDeduction || 0);
-
-  this.netSalary = (this.baseSalary || 0) + (this.allowances || 0) - this.totalDeductions;
-  next();
-});
 
 export default mongoose.model('Payroll', payrollSchema);

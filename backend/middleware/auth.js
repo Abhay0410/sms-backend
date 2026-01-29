@@ -14,6 +14,8 @@ export const requireAuth = (allowedRoles = []) => {
 
       const authHeader = req.headers.authorization;
       const cookieToken = req.cookies?.studentToken || req.cookies?.adminToken || req.cookies?.teacherToken || req.cookies?.parentToken;
+      // ✨ ADD THIS LINE: URL query se token nikalne ke liye
+      const queryToken = req.query.token; 
 
       let token = null;
 
@@ -23,8 +25,11 @@ export const requireAuth = (allowedRoles = []) => {
       } else if (cookieToken) {
         token = cookieToken;
         console.log("  Using token from cookie");
+      } else if (queryToken) { // ✨ NEW CONDITION
+        token = queryToken;
+        console.log("  Using token from URL query");
       } else {
-        console.log("  ❌ No Bearer token or cookie token found");
+        console.log("  ❌ No Bearer token, cookie token, or query token found");
         throw new AuthenticationError("No token provided");
       }
 

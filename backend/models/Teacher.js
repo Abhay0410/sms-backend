@@ -29,7 +29,7 @@ const teacherSchema = new mongoose.Schema({
   bloodGroup: String,
   nationality: { type: String, default: 'Indian' },
   aadharNumber: { type: String, unique: true, sparse: true },
-  panNumber: { type: String, unique: true, sparse: true }, // ✅ NEW: For TDS Compliance
+  panNumber: { type: String, unique: true, sparse: true, uppercase: true, trim: true }, // ✅ NEW: For TDS Compliance
   phone: { type: String, required: true },
   alternatePhone: String,
   

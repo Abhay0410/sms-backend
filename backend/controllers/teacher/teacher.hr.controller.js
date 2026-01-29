@@ -118,7 +118,6 @@ export const getRecentAttendance = asyncHandler(async (req, res) => {
 
     return successResponse(res, 'Recent attendance history retrieved', history);
 });
-// controllers/teacher/teacher.hr.controller.js
 
 export const getAttendanceStats = asyncHandler(async (req, res) => {
     const teacherId = req.user.id;

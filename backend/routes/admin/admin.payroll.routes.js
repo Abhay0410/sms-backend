@@ -13,8 +13,10 @@ import {
   updateTeacherSalary,
   updatePayroll,
   getTeacherPayrollHistory,
+  getMySalaryHistory,
   generateMonthlyPayroll,
-  getPayrollDetails
+  getPayrollDetails,
+  downloadSalarySlip
 } from '../../controllers/admin/admin.payroll.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
 
@@ -44,6 +46,8 @@ router.get('/slip-details/:slipId', requireAuth(['admin', 'teacher']), getPayrol
 router.put('/mark-paid/:slipId', requireAuth(['admin']), markPayrollPaid);
 router.patch('/update/:id', requireAuth(['admin']), updatePayroll);
 router.delete('/delete/:payrollId', requireAuth(['admin']), deleteDraftPayroll);
+router.get('/my-history', requireAuth(['admin', 'teacher']), getMySalaryHistory);
+router.get('/download-slip/:slipId', requireAuth(['admin', 'teacher']), downloadSalarySlip);
 
 // 5. Dynamic/Generic Routes LAST
 router.get('/', requireAuth(['admin']), getMonthlyPayroll);

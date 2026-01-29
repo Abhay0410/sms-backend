@@ -1,8 +1,11 @@
 // controllers/admin/admin.payroll.controller.js
 import mongoose from 'mongoose';
+import School from '../../models/School.js';
 import Payroll from '../../models/Payroll.js';
 import Teacher from '../../models/Teacher.js';
 import StaffAttendance from '../../models/StaffAttendance.js';
+import PDFDocument from 'pdfkit';
+import LeaveRequest from '../../models/LeaveRequest.js';
 import Admin from '../../models/Admin.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -132,10 +135,12 @@ export const calculateAndSetSalary = asyncHandler(async (req, res) => {
 
 // ✅ POST: Run monthly payroll for selected employees
 export const runMonthlyPayroll = asyncHandler(async (req, res) => {
-  const { month, year, employeeIds } = req.body;
+  const { month, year, employeeIds } = req.body; // Month "1", Year 2026
   const schoolId = req.schoolId;
 
   const results = { success: [], failed: [] };
+  
+  // ✅ FIX: Accurate Days calculation for 2026
   const workingDaysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
   const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
   const endDate = new Date(parseInt(year), parseInt(month), 0, 23, 59, 59);
@@ -152,28 +157,56 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       });
 
       const presentDays = attendanceRecords.filter(r => ['PRESENT', 'LATE', 'HALF_DAY'].includes(r.status)).length;
-      const attendanceFactor = presentDays / workingDaysInMonth;
 
-      // ✅ Create a CLEAN document to avoid nulls
+      // ✅ 2. NEW: Fetch Approved Paid Leaves
+      const approvedLeaves = await LeaveRequest.find({
+          teacherId: employeeId,
+          schoolId,
+          status: 'APPROVED',
+          startDate: { $lte: endDate },
+          endDate: { $gte: startDate }
+      });
+
+      let paidLeaveDays = 0;
+      approvedLeaves.forEach(leave => {
+          const overlapStart = new Date(Math.max(new Date(leave.startDate), startDate));
+          const overlapEnd = new Date(Math.min(new Date(leave.endDate), endDate));
+          const diffTime = Math.abs(overlapEnd - overlapStart);
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          paidLeaveDays += diffDays;
+      });
+
+      const totalPaidDays = presentDays + paidLeaveDays;
+      const attendanceFactor = Math.min(1, totalPaidDays / workingDaysInMonth);
+      
+      // ✅ FIX: Logic to handle precise Component breakdown
+      const monthlyGross = Math.round(structure.grossSalary * attendanceFactor);
+      const monthlyBasic = Math.round(structure.earnings.basic * attendanceFactor);
+      const monthlyHRA = Math.round(structure.earnings.hra * attendanceFactor);
+      const monthlySpecial = monthlyGross - (monthlyBasic + monthlyHRA);
+
       const monthlySlip = new Payroll({
         schoolId,
         employeeId,
-        month: month.toString(), // Force "1", "2" etc.
-        year: year.toString(),   // Force "2026"
+        month: month.toString(), // Ensure "1" instead of null
+        year: parseInt(year),    // Ensure 2026 instead of null
         ctc: structure.ctc,
-        grossSalary: structure.grossSalary * attendanceFactor,
+        grossSalary: monthlyGross,
         earnings: {
-          basic: structure.earnings.basic * attendanceFactor,
-          da: structure.earnings.da * attendanceFactor,
-          hra: structure.earnings.hra * attendanceFactor,
-          specialAllowance: structure.earnings.specialAllowance * attendanceFactor
+          basic: monthlyBasic,
+          hra: monthlyHRA,
+          specialAllowance: monthlySpecial
         },
-        deductions: structure.deductions,
+        deductions: {
+          epfEmployee: Math.round(structure.deductions.epfEmployee * attendanceFactor),
+          professionalTax: 200,
+          tds: structure.deductions.tds || 0
+        },
         statutory: structure.statutory,
-        netSalary: (structure.grossSalary * attendanceFactor) - (structure.deductions.epfEmployee + structure.deductions.professionalTax),
+        netSalary: monthlyGross - (Math.round(structure.deductions.epfEmployee * attendanceFactor) + 200),
         taxRegime: structure.taxRegime,
         isTemplate: false,
-        attendanceDays: presentDays,
+        attendanceDays: totalPaidDays,
         paymentStatus: 'PENDING'
       });
 
@@ -221,45 +254,47 @@ export const getUnifiedStaffList = asyncHandler(async (req, res) => {
 
 // ✅ GET: Get payroll summary for dashboard
 export const getPayrollSummary = asyncHandler(async (req, res) => {
-  const schoolId = req.schoolId;
-  const currentMonth = new Date().getMonth() + 1;
-  const currentYear = new Date().getFullYear();
+    const schoolId = req.schoolId;
+    const currentMonth = (new Date().getMonth() + 1).toString();
+    const currentYear = new Date().getFullYear();
 
-  // 1. Get total active staff (teachers + admins)
-  const totalTeachers = await Teacher.countDocuments({ schoolId, isActive: true });
-  const totalAdmins = await Admin.countDocuments({ schoolId, isActive: true });
-  const totalStaff = totalTeachers + totalAdmins;
+    // 1. Get all active staff
+    const teachers = await Teacher.find({ schoolId, isActive: true }).select('name teacherID department') || [];
+    const admins = await Admin.find({ schoolId, isActive: true }).select('name adminID department') || [];
+    const allStaff = [...teachers, ...admins];
 
-  // 2. Get payroll summary for current month
-  const payrolls = await Payroll.find({ 
-    schoolId, 
-    month: currentMonth, 
-    year: currentYear,
-    isTemplate: false 
-  });
+    // 2. Fetch ALL structures and ALL processed slips for this month
+    const [structures, currentMonthPayrolls] = await Promise.all([
+        Payroll.find({ schoolId, isTemplate: true }).select('employeeId grossSalary'),
+        Payroll.find({ schoolId, month: currentMonth, year: currentYear, isTemplate: false })
+    ]);
 
-  // 3. Calculate totals
-  const paid = payrolls
-    .filter(p => p.paymentStatus === 'PAID')
-    .reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    // 3. Map status for each member
+    const staffWithStatus = allStaff.map(s => {
+        // Find master setup
+        const structure = structures.find(st => st.employeeId.toString() === s._id.toString());
+        // Find if slip already generated this month
+        const slip = currentMonthPayrolls.find(p => p.employeeId.toString() === s._id.toString());
+        
+        return {
+            ...s.toObject(),
+            hasStructure: !!structure,
+            // ✅ FIX: Use structure gross, fallback to slip gross, then 0
+            monthlyGross: structure?.grossSalary || slip?.grossSalary || 0,
+            payrollStatus: slip ? slip.paymentStatus : (structure ? "READY" : "NOT_CONFIGURED")
+        };
+    });
 
-  const pending = payrolls
-    .filter(p => p.paymentStatus !== 'PAID')
-    .reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const paidTotal = currentMonthPayrolls.filter(p => p.paymentStatus === 'PAID').reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const pendingTotal = currentMonthPayrolls.filter(p => p.paymentStatus !== 'PAID').reduce((sum, p) => sum + (p.netSalary || 0), 0);
 
-  const totalPayrollCost = paid + pending;
-
-  return successResponse(res, "Payroll summary retrieved", {
-    paid,
-    pending,
-    totalPayrollCost,
-    totalStaff,
-    breakdown: {
-      teachers: totalTeachers,
-      admins: totalAdmins
-    },
-    currentPeriod: `${currentMonth}/${currentYear}`
-  });
+    return successResponse(res, "Payroll summary retrieved", {
+        paid: Math.round(paidTotal),
+        pending: Math.round(pendingTotal),
+        totalStaff: allStaff.length,
+        staffList: staffWithStatus,
+        processedCount: currentMonthPayrolls.length
+    });
 });
 
 // ✅ GET: Get specific employee's payroll structure
@@ -283,26 +318,28 @@ export const getPayrollStructure = asyncHandler(async (req, res) => {
 // ✅ PATCH: Mark payroll as paid
 export const markPayrollPaid = asyncHandler(async (req, res) => {
   const { slipId } = req.params;
-  const { transactionId, paymentMode } = req.body;
+  const { transactionId, paymentMode } = req.body; // IMPS, NEFT, etc.
   const schoolId = req.schoolId;
+
+  if (!transactionId) throw new ValidationError("Transaction ID is required");
 
   const slip = await Payroll.findOneAndUpdate(
     { _id: slipId, schoolId, isTemplate: false },
     {
       paymentStatus: 'PAID',
       paymentDate: new Date(),
-      transactionId,
-      paymentMode,
+      transactionId: transactionId.toUpperCase(),
+      paymentMode: paymentMode || 'NEFT',
       updatedAt: new Date()
     },
     { new: true, runValidators: true }
   );
 
   if (!slip) {
-    throw new NotFoundError("Payroll slip not found or already processed");
+    throw new NotFoundError("Payroll slip not found");
   }
 
-  return successResponse(res, "Payroll marked as paid successfully", slip);
+  return successResponse(res, "Payment status updated to PAID", slip);
 });
 
 // ✅ GET: Get monthly payroll list (FIXED for your DB structure)
@@ -356,12 +393,47 @@ export const deleteDraftPayroll = asyncHandler(async (req, res) => {
 export const updateTeacherSalary = asyncHandler(async (req, res) => {
   const { teacherId } = req.params;
   const updateData = req.body;
+  const { monthlyGross, limitPF, taxRegime } = req.body;
   const schoolId = req.schoolId;
+
+  if (!monthlyGross) {
+    throw new ValidationError("Monthly Gross Salary is required");
+  }
+
+  // Re-calculate components based on new gross
+  const basic = monthlyGross * 0.50;
+  const da = basic * 0.10;
+  const hra = basic * 0.20;
+  const specialAllowance = monthlyGross - (basic + da + hra);
+
+  let pfBasis = basic + da;
+  if (limitPF && pfBasis > 15000) pfBasis = 15000;
+  const epfEmployee = pfBasis * 0.12;
+  const epfEmployer = pfBasis * 0.12;
+
+  const gratuityProvision = (basic + da) / 26 * 15 / 12;
+
+  const annualTaxable = (monthlyGross * 12) - 75000;
+  let annualTds = 0;
+  if (annualTaxable > 1200000) {
+    annualTds = (annualTaxable - 1200000) * 0.10;
+  }
+  const monthlyTds = annualTds / 12;
+
+  const netSalary = monthlyGross - (epfEmployee + monthlyTds + 200);
 
   const updated = await Payroll.findOneAndUpdate(
     { employeeId: teacherId, schoolId, isTemplate: true },
-    updateData,
-    { new: true, runValidators: true }
+    {
+      ctc: monthlyGross + epfEmployer + gratuityProvision,
+      grossSalary: monthlyGross,
+      earnings: { basic, da, hra, specialAllowance },
+      deductions: { epfEmployee, tds: monthlyTds, professionalTax: 200 },
+      statutory: { epfEmployer, gratuityProvision },
+      netSalary,
+      taxRegime: taxRegime || 'NEW'
+    },
+    { new: true, runValidators: true, upsert: true }
   );
 
   if (!updated) {
@@ -532,13 +604,149 @@ export const getPayrollDetails = asyncHandler(async (req, res) => {
   const schoolId = req.schoolId;
 
   const slip = await Payroll.findOne({ _id: slipId, schoolId }).lean();
-  if (!slip) throw new NotFoundError("Salary slip not found");
+  if (!slip) throw new NotFoundError("Salary slip");
 
-  // Fetch Employee Details for the Header
-  let staff = await Teacher.findById(slip.employeeId).select('name teacherID department phone panNumber email salary.bankDetails');
-  if (!staff) staff = await Admin.findById(slip.employeeId).select('name adminID department phone panNumber email salary.bankDetails');
+  // ✅ FIX: Added 'salary' and 'panNumber' in the select string
+  let staff = await Teacher.findById(slip.employeeId).select('name teacherID department phone panNumber salary email') || 
+              await Admin.findById(slip.employeeId).select('name adminID department phone panNumber salary email');
+
+  if (!staff) throw new NotFoundError("Staff record not found");
 
   return successResponse(res, "Slip details retrieved", { slip, staff });
+});
+
+// ✅ GET: Download salary slip as PDF (Refined & Fixed)
+export const downloadSalarySlip = asyncHandler(async (req, res) => {
+    const { slipId } = req.params;
+    const schoolId = req.schoolId;
+
+    const monthNames = [
+        "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+        "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"
+    ];
+
+    const slip = await Payroll.findOne({ _id: slipId, schoolId }).lean();
+    if (!slip) throw new NotFoundError("Salary slip not found");
+
+    // ✅ FIX 1: Strict query for all required fields
+    const staff = await Teacher.findById(slip.employeeId).select('name teacherID department panNumber salary email') || 
+                  await Admin.findById(slip.employeeId).select('name adminID department panNumber salary email');
+    
+    if (!staff) throw new NotFoundError("Staff member not found");
+
+    const school = await School.findById(schoolId).lean(); 
+
+    // ✅ Convert numeric month "1" to name "JANUARY"
+    const displayMonth = isNaN(slip.month) ? slip.month : monthNames[parseInt(slip.month) - 1];
+
+    // ✅ FIX 2: Single Header Set (Remove duplicates)
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=SalarySlip_${staff.name.replace(/\s+/g, '_')}_${displayMonth}.pdf`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    doc.pipe(res);
+
+    try {
+        // --- 🏢 Header ---
+        doc.fillColor('#1e3a8a').fontSize(20).font('Helvetica-Bold').text(school?.schoolName?.toUpperCase() || 'SCHOOL NAME', { align: 'center' });
+        doc.fillColor('#64748b').fontSize(10).font('Helvetica').text(school?.address?.city || '', { align: 'center' }).moveDown(2);
+
+        // ✅ FIX 3: Single Title (Removed duplicate)
+        doc.fillColor('#000000').fontSize(14).font('Helvetica-Bold').text(`PAYSLIP FOR ${displayMonth} ${slip.year}`, { align: 'center', underline: true });
+        doc.moveDown(2);
+
+        // --- 👤 Employee Info Box ---
+        const startY = doc.y;
+        doc.rect(50, startY, 500, 85).stroke('#cbd5e1');
+        
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e293b');
+        doc.text('Employee Name:', 65, startY + 15); 
+        doc.font('Helvetica').text(staff.name || 'N/A', 165, startY + 15);
+
+        doc.font('Helvetica-Bold').text('Employee ID:', 65, startY + 35); 
+        doc.font('Helvetica').text(staff.teacherID || staff.adminID || 'N/A', 165, startY + 35);
+
+        doc.font('Helvetica-Bold').text('Department:', 65, startY + 55); 
+        doc.font('Helvetica').text(staff.department || 'Teaching', 165, startY + 55);
+        
+        // ✅ FIX 4: Correct mapping for Bank and PAN
+        doc.font('Helvetica-Bold').text('PAN No:', 310, startY + 15); 
+        doc.font('Helvetica').text(staff.panNumber || 'N/A', 390, startY + 15);
+
+        // ✅ Logic: Agar PAN hai toh number dikhao, warna "NOT PROVIDED" ya dash
+        const panToShow = staff.panNumber && staff.panNumber.trim() !== "" 
+            ? staff.panNumber 
+            : "----------"; 
+        doc.font('Helvetica').text(panToShow, 390, startY + 15);
+
+        doc.font('Helvetica-Bold').text('Bank A/c:', 310, startY + 35); 
+        const accNo = staff.salary?.bankDetails?.accountNumber || 'N/A';
+        doc.font('Helvetica').text(accNo, 390, startY + 35);
+        
+        doc.font('Helvetica-Bold').text('Regime:', 310, startY + 55); 
+        doc.font('Helvetica').text(slip.taxRegime || 'NEW', 390, startY + 55);
+
+        doc.moveDown(6);
+
+        // --- 💰 Salary Table (Breakdown logic is correct, just ensuring safety) ---
+        const tableTop = doc.y;
+        doc.rect(50, tableTop, 500, 20).fill('#f1f5f9').stroke('#cbd5e1');
+        doc.fillColor('#1e3a8a').fontSize(10).font('Helvetica-Bold');
+        doc.text('EARNINGS', 65, tableTop + 6);
+        doc.text('AMOUNT', 210, tableTop + 6);
+        doc.text('DEDUCTIONS', 310, tableTop + 6);
+        doc.text('AMOUNT', 460, tableTop + 6);
+
+        let rowY = tableTop + 30;
+        doc.fillColor('#000000').font('Helvetica');
+        
+        doc.text('Basic Pay', 65, rowY); doc.text(`Rs. ${Math.round(slip.earnings?.basic || 0).toLocaleString()}`, 210, rowY);
+        doc.text('EPF Employee', 310, rowY); doc.text(`Rs. ${Math.round(slip.deductions?.epfEmployee || 0).toLocaleString()}`, 460, rowY);
+        
+        doc.text('HRA', 65, rowY + 20); doc.text(`Rs. ${Math.round(slip.earnings?.hra || 0).toLocaleString()}`, 210, rowY + 20);
+        doc.text('Prof. Tax (PT)', 310, rowY + 20); doc.text(`Rs. ${Math.round(slip.deductions?.professionalTax || 200).toLocaleString()}`, 460, rowY + 20);
+
+        doc.text('Special Allw.', 65, rowY + 40); doc.text(`Rs. ${Math.round(slip.earnings?.specialAllowance || 0).toLocaleString()}`, 210, rowY + 40);
+        doc.text('TDS', 310, rowY + 40); doc.text(`Rs. ${Math.round(slip.deductions?.tds || 0).toLocaleString()}`, 460, rowY + 40);
+
+        // --- 💵 Footer ---
+        doc.moveDown(8);
+        const footerY = doc.y;
+        doc.rect(50, footerY, 500, 35).fill('#1e3a8a');
+        doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold');
+        doc.text('NET TAKE-HOME PAY:', 65, footerY + 12);
+        doc.fontSize(14).text(`Rs. ${Math.round(slip.netSalary || 0).toLocaleString()}`, 350, footerY + 12, { align: 'right', width: 180 });
+
+        if (slip.paymentStatus === 'PAID') {
+            doc.moveDown();
+            doc.fontSize(10).font('Helvetica-Bold').fillColor('#059669'); // Green color
+            doc.text(`PAYMENT CONFIRMED`, { align: 'center' });
+            doc.fontSize(9).fillColor('#475569').text(`Transaction ID: ${slip.transactionId}`, { align: 'center' });
+            doc.text(`Payment Date: ${new Date(slip.paymentDate).toLocaleDateString('en-IN')}`, { align: 'center' });
+        }
+
+        doc.moveDown(4);
+        doc.fillColor('#94a3b8').fontSize(8).font('Helvetica').text('This is a system-generated payslip and does not require a physical signature.', { align: 'center' });
+
+    } catch (error) {
+        console.error('Error drawing PDF:', error);
+    }
+
+    doc.end();
+});
+
+// ✅ GET: Kisi bhi staff (Admin/Teacher) ke liye apni history dekhna
+export const getMySalaryHistory = asyncHandler(async (req, res) => {
+    const userId = req.user.id; // Logged in user's ID
+    const schoolId = req.schoolId;
+
+    const history = await Payroll.find({
+        employeeId: userId,
+        schoolId,
+        isTemplate: false 
+    }).sort({ year: -1, month: -1 });
+
+    return successResponse(res, "Your salary history retrieved", history);
 });
 
 export default {
@@ -555,5 +763,7 @@ export default {
   updatePayroll,
   getTeacherPayrollHistory,
   generateMonthlyPayroll,
-  getPayrollDetails
+  getPayrollDetails,
+  downloadSalarySlip,
+  getMySalaryHistory
 };

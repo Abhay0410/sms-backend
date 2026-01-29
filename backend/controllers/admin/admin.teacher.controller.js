@@ -110,7 +110,8 @@ export const createTeacher = asyncHandler(async (req, res) => {
   const {
     name, email, password, phone, dateOfBirth, gender, address,
     qualification, specialization, experience, joiningDate,
-    employmentType, salary, subjects,department
+    employmentType, salary, subjects, department,
+    panNumber // ✅ Make sure it's extracted from req.body
   } = req.body;
   
   if (!name || !email || !phone) {
@@ -146,6 +147,7 @@ export const createTeacher = asyncHandler(async (req, res) => {
     phone,
     dateOfBirth,
     department,
+    panNumber, // ✅ ADD THIS LINE - Iske bina save nahi hoga
     gender,
     address,
     qualification,

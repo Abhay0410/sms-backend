@@ -221,6 +221,56 @@ export const getStudentAttendanceSummary = asyncHandler(async (req, res) => {
 });
 
 // Get teacher classes - MULTI-TENANT
+// export const getTeacherClasses = asyncHandler(async (req, res) => {
+//   const teacherId = req.user.id;
+//   const academicYear = req.query.academicYear || getCurrentAcademicYear();
+
+//   const teacher = await Teacher.findOne({
+//     _id: teacherId,
+//     schoolId: req.schoolId
+//   });
+
+//   if (!teacher) {
+//     throw new NotFoundError('Teacher');
+//   }
+
+//   const classes = await Class.find({
+//     schoolId: req.schoolId,
+//     academicYear,
+//     'sections.classTeacher': teacherId,
+//   })
+//     .select('className academicYear sections')
+//     .lean();
+
+//   const assignedClasses = [];
+
+//   classes.forEach(cls => {
+//     cls.sections.forEach(sec => {
+//       if (sec.classTeacher?.toString() === teacherId.toString()) {
+//         assignedClasses.push({
+//           classId: cls._id.toString(),
+//           className: cls.className,
+//           section: sec.sectionName,
+//           sectionId: sec._id.toString(),
+//           academicYear: cls.academicYear,
+//         });
+//       }
+//     });
+//   });
+
+//   const canMarkAttendance = assignedClasses.length > 0;
+
+//   return successResponse(res, 'Teacher assignments retrieved', {
+//     teacher: { id: teacherId, name: teacher.name },
+//     classes: assignedClasses,
+//     teachingSubjects: [],
+//     canMarkAttendance,
+//     roles: {
+//       isClassTeacher: canMarkAttendance,
+//       isSubjectTeacher: false,
+//     },
+//   });
+// });
 export const getTeacherClasses = asyncHandler(async (req, res) => {
   const teacherId = req.user.id;
   const academicYear = req.query.academicYear || getCurrentAcademicYear();
@@ -228,49 +278,57 @@ export const getTeacherClasses = asyncHandler(async (req, res) => {
   const teacher = await Teacher.findOne({
     _id: teacherId,
     schoolId: req.schoolId
-  });
+  }).populate('assignedClasses.class', 'className sections');
 
   if (!teacher) {
     throw new NotFoundError('Teacher');
   }
 
-  const classes = await Class.find({
-    schoolId: req.schoolId,
-    academicYear,
-    'sections.classTeacher': teacherId,
-  })
-    .select('className academicYear sections')
-    .lean();
+  const classes = [];
+  const teachingSubjects = [];
 
-  const assignedClasses = [];
+  teacher.assignedClasses.forEach(ac => {
+    if (ac.isClassTeacher) {
+      const section = ac.class?.sections?.find(
+        s => s.sectionName === ac.section
+      );
 
-  classes.forEach(cls => {
-    cls.sections.forEach(sec => {
-      if (sec.classTeacher?.toString() === teacherId.toString()) {
-        assignedClasses.push({
-          classId: cls._id.toString(),
-          className: cls.className,
-          section: sec.sectionName,
-          sectionId: sec._id.toString(),
-          academicYear: cls.academicYear,
-        });
-      }
-    });
+      classes.push({
+        classId: ac.class?._id,
+        className: ac.class?.className,
+        section: ac.section,
+        sectionId: section?._id,
+        currentStrength: section?.students?.length || 0,
+        academicYear
+      });
+    } else {
+      teachingSubjects.push({
+        subjectName: ac.subject,
+        classId: ac.class?._id,
+        className: ac.class?.className,
+        section: ac.section,
+        hoursPerWeek: ac.hoursPerWeek || 0,
+        academicYear
+      });
+    }
   });
-
-  const canMarkAttendance = assignedClasses.length > 0;
 
   return successResponse(res, 'Teacher assignments retrieved', {
-    teacher: { id: teacherId, name: teacher.name },
-    classes: assignedClasses,
-    teachingSubjects: [],
-    canMarkAttendance,
-    roles: {
-      isClassTeacher: canMarkAttendance,
-      isSubjectTeacher: false,
+    teacher: {
+      id: teacher._id,
+      name: teacher.name,
+      teacherID: teacher.teacherID
     },
+    classes,
+    teachingSubjects,
+    canMarkAttendance: classes.length > 0 || teachingSubjects.length > 0,
+    roles: {
+      isClassTeacher: classes.length > 0,
+      isSubjectTeacher: teachingSubjects.length > 0
+    }
   });
 });
+
 
 
 // Get class students - MULTI-TENANT

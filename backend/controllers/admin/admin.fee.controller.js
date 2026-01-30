@@ -374,6 +374,8 @@ export const createBulkFeeStructureFromClass = asyncHandler(async (req, res) => 
 export const recordPayment = asyncHandler(async (req, res) => {
   const { studentId, academicYear, amountPaid, paymentMode, paymentDate, remarks, selectedInstallmentIds } = req.body;
 
+
+
   const fee = await FeePayment.findOne({ student: studentId, academicYear, schoolId: req.schoolId });
   if (!fee) throw new NotFoundError("Fee record not found");
 
@@ -432,8 +434,15 @@ export const recordPayment = asyncHandler(async (req, res) => {
   fee.status = fee.balancePending <= 0 ? "PAID" : "PARTIAL";
 
   await fee.save();
-  return successResponse(res, "Payment processed successfully", { feePayment: fee, receiptNumber });
+
+    const lastPayment = fee.payments[fee.payments.length - 1];
+  return successResponse(res, "Payment processed successfully", {
+     feePayment: fee._id,
+      receiptNumber: lastPayment.receiptNumber,
+      paymentId: lastPayment._id
 });
+});
+
 // ==========================================
 // 5. FEE REPORTS & STATISTICS
 // ==========================================

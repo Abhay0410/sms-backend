@@ -1,12 +1,14 @@
 // controllers/admin/admin.payroll.controller.js
 import mongoose from 'mongoose';
 import School from '../../models/School.js';
+import Staff from '../../models/StaffSalaryPolicy.js';
 import Payroll from '../../models/Payroll.js';
 import Teacher from '../../models/Teacher.js';
 import StaffAttendance from '../../models/StaffAttendance.js';
 import PDFDocument from 'pdfkit';
 import LeaveRequest from '../../models/LeaveRequest.js';
 import Admin from '../../models/Admin.js';
+import SchoolPolicy from '../../models/StaffSalaryPolicy.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
@@ -80,12 +82,17 @@ export const calculateAndSetSalary = asyncHandler(async (req, res) => {
     throw new ValidationError("Employee ID and Monthly Gross are required");
   }
 
-  // 1. Basic = 50% of Gross (New Wage Code 2026)
-  const basic = monthlyGross * 0.50;
-  
-  // 2. DA (Example 10% of Basic) and HRA (Example 20% of Basic)
-  const da = basic * 0.10;
-  const hra = basic * 0.20;
+  // ✅ 1. Fetch Global School Policy
+  let policy = await SchoolPolicy.findOne({ schoolId });
+
+  // Agar policy nahi bani, toh default 2026 standards use karo
+  const bPct = (policy?.payrollSettings?.basicPercent || 50) / 100;
+  const hPct = (policy?.payrollSettings?.hraPercent || 20) / 100;
+  const dPct = (policy?.payrollSettings?.daPercent || 10) / 100;
+
+  const basic = monthlyGross * bPct;
+  const da = basic * dPct;
+  const hra = basic * hPct;
   const specialAllowance = monthlyGross - (basic + da + hra);
 
   // 3. EPF Calculation (12% of Basic + DA)
@@ -135,7 +142,7 @@ export const calculateAndSetSalary = asyncHandler(async (req, res) => {
 
 // ✅ POST: Run monthly payroll for selected employees
 export const runMonthlyPayroll = asyncHandler(async (req, res) => {
-  const { month, year, employeeIds } = req.body; // Month "1", Year 2026
+  const { month, year, employeeIds, extraEarnings } = req.body; // Month "1", Year 2026
   const schoolId = req.schoolId;
 
   const results = { success: [], failed: [] };
@@ -179,11 +186,22 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       const totalPaidDays = presentDays + paidLeaveDays;
       const attendanceFactor = Math.min(1, totalPaidDays / workingDaysInMonth);
       
+      // ✅ Calculate Total Extra Pay from Array
+      const extras = extraEarnings?.[employeeId] || [];
+      const totalExtra = extras.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
       // ✅ FIX: Logic to handle precise Component breakdown
-      const monthlyGross = Math.round(structure.grossSalary * attendanceFactor);
+      const baseGross = Math.round(structure.grossSalary * attendanceFactor);
+      const monthlyGross = baseGross + totalExtra;
+
       const monthlyBasic = Math.round(structure.earnings.basic * attendanceFactor);
       const monthlyHRA = Math.round(structure.earnings.hra * attendanceFactor);
-      const monthlySpecial = monthlyGross - (monthlyBasic + monthlyHRA);
+      const monthlyDA = Math.round((structure.earnings.da || 0) * attendanceFactor);
+      const monthlySpecial = Math.round(structure.earnings.specialAllowance * attendanceFactor);
+      
+      const epfEmployee = Math.round(structure.deductions.epfEmployee * attendanceFactor);
+      const tds = structure.deductions.tds || 0;
+      const professionalTax = 200;
 
       const monthlySlip = new Payroll({
         schoolId,
@@ -195,15 +213,17 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
         earnings: {
           basic: monthlyBasic,
           hra: monthlyHRA,
-          specialAllowance: monthlySpecial
+          da: monthlyDA,
+          specialAllowance: monthlySpecial,
+          extraActivities: extras // ✅ Pure array save karein
         },
         deductions: {
-          epfEmployee: Math.round(structure.deductions.epfEmployee * attendanceFactor),
-          professionalTax: 200,
-          tds: structure.deductions.tds || 0
+          epfEmployee,
+          professionalTax,
+          tds
         },
         statutory: structure.statutory,
-        netSalary: monthlyGross - (Math.round(structure.deductions.epfEmployee * attendanceFactor) + 200),
+        netSalary: monthlyGross - (epfEmployee + professionalTax + tds),
         taxRegime: structure.taxRegime,
         isTemplate: false,
         attendanceDays: totalPaidDays,
@@ -340,6 +360,46 @@ export const markPayrollPaid = asyncHandler(async (req, res) => {
   }
 
   return successResponse(res, "Payment status updated to PAID", slip);
+});
+// ✅ POST controller for frontend to update school payroll policy
+
+// controllers/admin/admin.payroll.controller.js mein add karein
+
+export const updateSchoolPayrollPolicy = asyncHandler(async (req, res) => {
+    const { basicPercent, hraPercent, daPercent } = req.body;
+    const schoolId = req.schoolId;
+
+    const policy = await SchoolPolicy.findOneAndUpdate(
+        { schoolId },
+        { 
+            payrollSettings: { 
+                basicPercent: Number(basicPercent), 
+                hraPercent: Number(hraPercent), 
+                daPercent: Number(daPercent) 
+            } 
+        },
+        { upsert: true, new: true }
+    );
+
+    return successResponse(res, "Global school policy updated", policy);
+});
+
+// ✅ GET controller for frontend to fetch school payroll policy
+export const getSchoolPayrollPolicy = asyncHandler(async (req, res) => {
+    const schoolId = req.schoolId;
+    const policy = await SchoolPolicy.findOne({ schoolId });
+    
+    // ✅ DEFAULT GOVT NORMS (2026)
+    const defaultSettings = {
+        payrollSettings: { 
+            basicPercent: 50, 
+            hraPercent: 20, 
+            daPercent: 10 
+        }
+    };
+
+    // Agar DB mein policy nahi hai, toh default bhej do
+    return successResponse(res, "Policy retrieved", policy || defaultSettings);
 });
 
 // ✅ GET: Get monthly payroll list (FIXED for your DB structure)
@@ -569,8 +629,8 @@ export const generateMonthlyPayroll = asyncHandler(async (req, res) => {
         netSalary: netPayable,
         taxRegime: structure.taxRegime,
         isTemplate: false,
-        month,
-        year,
+        month:month.toString(),
+        year:Number(year),
         attendanceData: {
           totalDays: workingDaysInMonth,
           presentDays,
@@ -703,14 +763,32 @@ export const downloadSalarySlip = asyncHandler(async (req, res) => {
         doc.text('Basic Pay', 65, rowY); doc.text(`Rs. ${Math.round(slip.earnings?.basic || 0).toLocaleString()}`, 210, rowY);
         doc.text('EPF Employee', 310, rowY); doc.text(`Rs. ${Math.round(slip.deductions?.epfEmployee || 0).toLocaleString()}`, 460, rowY);
         
-        doc.text('HRA', 65, rowY + 20); doc.text(`Rs. ${Math.round(slip.earnings?.hra || 0).toLocaleString()}`, 210, rowY + 20);
+        doc.text('DA', 65, rowY + 20); doc.text(`Rs. ${Math.round(slip.earnings?.da || 0).toLocaleString()}`, 210, rowY + 20);
         doc.text('Prof. Tax (PT)', 310, rowY + 20); doc.text(`Rs. ${Math.round(slip.deductions?.professionalTax || 200).toLocaleString()}`, 460, rowY + 20);
 
-        doc.text('Special Allw.', 65, rowY + 40); doc.text(`Rs. ${Math.round(slip.earnings?.specialAllowance || 0).toLocaleString()}`, 210, rowY + 40);
+        doc.text('HRA', 65, rowY + 40); doc.text(`Rs. ${Math.round(slip.earnings?.hra || 0).toLocaleString()}`, 210, rowY + 40);
         doc.text('TDS', 310, rowY + 40); doc.text(`Rs. ${Math.round(slip.deductions?.tds || 0).toLocaleString()}`, 460, rowY + 40);
 
+        doc.text('Special Allw.', 65, rowY + 60); doc.text(`Rs. ${Math.round(slip.earnings?.specialAllowance || 0).toLocaleString()}`, 210, rowY + 60);
+
+        let currentY = rowY + 80;
+
+        if (slip.earnings?.extraActivities && Array.isArray(slip.earnings.extraActivities)) {
+            slip.earnings.extraActivities.forEach(act => {
+                if (act.amount > 0) {
+                    doc.text(`Extra (${act.remark || 'Activity'})`, 65, currentY); 
+                    doc.text(`Rs. ${Number(act.amount).toLocaleString()}`, 210, currentY);
+                    currentY += 20;
+                }
+            });
+        } else if (slip.earnings?.extraActivityPay > 0) {
+            doc.text(`Extra (${slip.earnings.activityRemarks || 'Activity'})`, 65, currentY); 
+            doc.text(`Rs. ${Number(slip.earnings.extraActivityPay).toLocaleString()}`, 210, currentY);
+            currentY += 20;
+        }
+
         // --- 💵 Footer ---
-        doc.moveDown(8);
+        doc.y = currentY + 30;
         const footerY = doc.y;
         doc.rect(50, footerY, 500, 35).fill('#1e3a8a');
         doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold');
@@ -765,5 +843,7 @@ export default {
   generateMonthlyPayroll,
   getPayrollDetails,
   downloadSalarySlip,
-  getMySalaryHistory
+  getMySalaryHistory,
+  updateSchoolPayrollPolicy,
+  getSchoolPayrollPolicy
 };

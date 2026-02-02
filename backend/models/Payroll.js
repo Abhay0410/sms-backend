@@ -18,7 +18,11 @@ const payrollSchema = new mongoose.Schema({
     da: { type: Number, default: 0 },
     hra: { type: Number, default: 0 },
     specialAllowance: { type: Number, default: 0 },
-    teachingAllowance: { type: Number, default: 0 }
+    teachingAllowance: { type: Number, default: 0 },
+    extraActivities: [{
+    amount: { type: Number, default: 0 },
+    remark: { type: String } // e.g., "Trip", "Exam Correction"
+  }]
   },
   
   // Deductions Breakdown

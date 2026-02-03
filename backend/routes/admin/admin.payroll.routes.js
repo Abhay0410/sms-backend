@@ -16,7 +16,9 @@ import {
   getMySalaryHistory,
   generateMonthlyPayroll,
   getPayrollDetails,
-  downloadSalarySlip
+  downloadSalarySlip,
+  updateSchoolPayrollPolicy,
+  getSchoolPayrollPolicy,
 } from '../../controllers/admin/admin.payroll.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
 
@@ -35,6 +37,8 @@ router.post('/run-payroll', requireAuth(['admin']), runMonthlyPayroll);
 router.post('/generate', requireAuth(['admin']), generateMonthlyPayroll);
 
 // 3. Structure Routes
+router.get('/policy', requireAuth(['admin']), getSchoolPayrollPolicy);
+router.post('/policy', requireAuth(['admin']), updateSchoolPayrollPolicy);
 router.post('/setup-salary', requireAuth(['admin']), calculateAndSetSalary);
 router.post('/setup-structure', requireAuth(['admin']), calculateAndSetSalary);
 router.get('/structure/:teacherId', requireAuth(['admin']), getPayrollStructure);

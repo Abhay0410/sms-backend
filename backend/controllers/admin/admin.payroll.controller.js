@@ -140,14 +140,13 @@ export const calculateAndSetSalary = asyncHandler(async (req, res) => {
   return successResponse(res, "Salary structure saved successfully", savedPayroll);
 });
 
-// ✅ POST: Run monthly payroll for selected employees
+// ✅ POST: Run monthly payroll with Manual Override support
 export const runMonthlyPayroll = asyncHandler(async (req, res) => {
-  const { month, year, employeeIds, extraEarnings } = req.body; // Month "1", Year 2026
+  const { month, year, employeeIds, extraEarnings, manualAmount } = req.body; 
   const schoolId = req.schoolId;
 
   const results = { success: [], failed: [] };
   
-  // ✅ FIX: Accurate Days calculation for 2026
   const workingDaysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
   const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
   const endDate = new Date(parseInt(year), parseInt(month), 0, 23, 59, 59);
@@ -157,6 +156,7 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       const structure = await Payroll.findOne({ employeeId, schoolId, isTemplate: true });
       if (!structure) throw new Error("Salary structure not set");
 
+      // Attendance fetching
       const attendanceRecords = await StaffAttendance.find({
         teacherId: employeeId,
         schoolId,
@@ -164,8 +164,8 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       });
 
       const presentDays = attendanceRecords.filter(r => ['PRESENT', 'LATE', 'HALF_DAY'].includes(r.status)).length;
-
-      // ✅ 2. NEW: Fetch Approved Paid Leaves
+      
+      // Approved Leaves logic
       const approvedLeaves = await LeaveRequest.find({
           teacherId: employeeId,
           schoolId,
@@ -178,52 +178,65 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       approvedLeaves.forEach(leave => {
           const overlapStart = new Date(Math.max(new Date(leave.startDate), startDate));
           const overlapEnd = new Date(Math.min(new Date(leave.endDate), endDate));
-          const diffTime = Math.abs(overlapEnd - overlapStart);
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          const diffDays = Math.ceil(Math.abs(overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
           paidLeaveDays += diffDays;
       });
 
       const totalPaidDays = presentDays + paidLeaveDays;
       const attendanceFactor = Math.min(1, totalPaidDays / workingDaysInMonth);
       
-      // ✅ Calculate Total Extra Pay from Array
+      // 🚀 MANUAL OVERRIDE LOGIC
+      let baseGross;
+      let overrideFactor;
+
+      if (manualAmount && Number(manualAmount) > 0) {
+        // Use forced amount as base gross
+        baseGross = Number(manualAmount);
+        // Calculate factor based on forced amount vs template gross
+        overrideFactor = baseGross / structure.grossSalary; 
+      } else {
+        // Normal attendance logic
+        baseGross = Math.round(structure.grossSalary * attendanceFactor);
+        overrideFactor = attendanceFactor;
+      }
+
+      // Extra Activities (Trips/Bonus)
       const extras = extraEarnings?.[employeeId] || [];
       const totalExtra = extras.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const finalMonthlyGross = baseGross + totalExtra;
 
-      // ✅ FIX: Logic to handle precise Component breakdown
-      const baseGross = Math.round(structure.grossSalary * attendanceFactor);
-      const monthlyGross = baseGross + totalExtra;
-
-      const monthlyBasic = Math.round(structure.earnings.basic * attendanceFactor);
-      const monthlyHRA = Math.round(structure.earnings.hra * attendanceFactor);
-      const monthlyDA = Math.round((structure.earnings.da || 0) * attendanceFactor);
-      const monthlySpecial = Math.round(structure.earnings.specialAllowance * attendanceFactor);
+      // Components calculation using overrideFactor
+      const monthlyBasic = Math.round(structure.earnings.basic * overrideFactor);
+      const monthlyHRA = Math.round(structure.earnings.hra * overrideFactor);
+      const monthlyDA = Math.round((structure.earnings.da || 0) * overrideFactor);
+      const monthlySpecial = baseGross - (monthlyBasic + monthlyHRA + monthlyDA); 
       
-      const epfEmployee = Math.round(structure.deductions.epfEmployee * attendanceFactor);
-      const tds = structure.deductions.tds || 0;
-      const professionalTax = 200;
+      // PF Calculation on forced components
+      let pfBasis = monthlyBasic + monthlyDA;
+      if (structure.limitPF && pfBasis > 15000) pfBasis = 15000;
+      const epfEmployee = Math.round(pfBasis * 0.12);
 
       const monthlySlip = new Payroll({
         schoolId,
         employeeId,
-        month: month.toString(), // Ensure "1" instead of null
-        year: parseInt(year),    // Ensure 2026 instead of null
+        month: month.toString(),
+        year: parseInt(year),
         ctc: structure.ctc,
-        grossSalary: monthlyGross,
+        grossSalary: finalMonthlyGross,
         earnings: {
           basic: monthlyBasic,
           hra: monthlyHRA,
           da: monthlyDA,
-          specialAllowance: monthlySpecial,
-          extraActivities: extras // ✅ Pure array save karein
+          specialAllowance: monthlySpecial > 0 ? monthlySpecial : 0,
+          extraActivities: extras
         },
         deductions: {
           epfEmployee,
-          professionalTax,
-          tds
+          professionalTax: 200,
+          tds: structure.deductions.tds || 0
         },
         statutory: structure.statutory,
-        netSalary: monthlyGross - (epfEmployee + professionalTax + tds),
+        netSalary: finalMonthlyGross - (epfEmployee + 200 + (structure.deductions.tds || 0)),
         taxRegime: structure.taxRegime,
         isTemplate: false,
         attendanceDays: totalPaidDays,
@@ -407,21 +420,23 @@ export const getMonthlyPayroll = asyncHandler(async (req, res) => {
   const { month, year } = req.query;
   const schoolId = req.schoolId;
 
-  // ✅ Query specifically using the string format
+  if (!month || !year) throw new ValidationError("Month and Year are required");
+
+  // Query specifically using the string format
+  // Note: .lean() hatane ki zaroorat nahi hai, bas niche logic change karni hai
   const payrolls = await Payroll.find({
     schoolId: new mongoose.Types.ObjectId(schoolId),
     month: month.toString(),
-    year: year.toString(),
+    year: parseInt(year),
     isTemplate: false
-  }).sort({ createdAt: -1 });
+  }).sort({ createdAt: -1 }).lean(); // Lean is good for performance
 
   const enrichedPayrolls = await Promise.all(payrolls.map(async (payroll) => {
-    // Check Teacher or Admin collection
     let staff = await Teacher.findById(payroll.employeeId).select('name teacherID');
     if (!staff) staff = await Admin.findById(payroll.employeeId).select('name adminID');
 
     return {
-      ...payroll.toObject(),
+      ...payroll, // ✅ FIX: toObject() call karne ki zaroorat nahi kyunki lean() pehle se object deta hai
       employeeName: staff?.name || "Unknown Staff",
       employeeCode: staff?.teacherID || staff?.adminID || "N/A"
     };

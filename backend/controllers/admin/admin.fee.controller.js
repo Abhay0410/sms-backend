@@ -1006,15 +1006,14 @@ export const getAllPayments = asyncHandler(async (req, res) => {
   if (status) filter.status = status;
   if (className) filter.className = className;
 
-  // Date filter hata do abhi
-  // if (startDate || endDate) { ... }
-
-  const payments = await FeePayment.find(filter)
+  // Use regular find instead of paginate
+  const feePayments = await FeePayment.find(filter)
+    .sort({ 'payments.paymentDate': -1 })
     .lean();
 
   const formattedPayments = [];
 
-  payments.forEach(fp => {
+  feePayments.forEach(fp => {
     const pays = Array.isArray(fp.payments) ? fp.payments : [];
     pays.forEach(pmt => {
       formattedPayments.push({
@@ -1036,7 +1035,9 @@ export const getAllPayments = asyncHandler(async (req, res) => {
     });
   });
 
-  return successResponse(res, 'All payments fetched', { payments: formattedPayments });
+  return successResponse(res, 'All payments fetched', { 
+    payments: formattedPayments
+  });
 });
 
 export default {

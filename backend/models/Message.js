@@ -12,11 +12,19 @@ const participantSchema = new mongoose.Schema({
   },
 });
 
+const attachmentSchema = new mongoose.Schema({
+  fileName: String,
+  fileUrl: String,
+  publicId: String,
+  fileType: String,
+  fileSize: Number
+});
+
 const messageItemSchema = new mongoose.Schema({
   senderType: { type: String, enum: ['teacher', 'student', 'parent'], required: true },
   senderId: { type: mongoose.Schema.Types.ObjectId, required: true },
   content: { type: String, required: true },
-  attachments: [String],
+  attachments: [attachmentSchema],
   createdAt: { type: Date, default: Date.now },
 });
 

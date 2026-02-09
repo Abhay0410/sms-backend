@@ -1,5 +1,6 @@
 // controllers/admin/admin.announcement.controller.js - MULTI-TENANT VERSION
 import Announcement from '../../models/Announcement.js';
+import School from '../../models/School.js';
 import Class from '../../models/Class.js';
 import Admin from '../../models/Admin.js';
 import { successResponse, paginatedResponse } from '../../utils/response.js';
@@ -125,7 +126,7 @@ export const createAnnouncement = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/announcements/${file.filename}`,
+        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -194,7 +195,7 @@ export const updateAnnouncement = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/announcements/${file.filename}`,
+        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -237,7 +238,7 @@ export const deleteAttachment = asyncHandler(async (req, res) => {
   }
   
   if (attachment.publicId) {
-    const filePath = path.join(__dirname, '../../uploads/announcements', attachment.publicId);
+    const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       console.log(`🗑️ Deleted file: ${attachment.publicId}`);
@@ -265,7 +266,7 @@ export const deleteAnnouncement = asyncHandler(async (req, res) => {
   if (announcement.attachments && announcement.attachments.length > 0) {
     for (const attachment of announcement.attachments) {
       if (attachment.publicId) {
-        const filePath = path.join(__dirname, '../../uploads/announcements', attachment.publicId);
+        const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
           console.log(`🗑️ Deleted file: ${attachment.publicId}`);

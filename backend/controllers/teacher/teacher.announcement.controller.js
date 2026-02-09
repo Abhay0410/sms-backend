@@ -167,7 +167,7 @@ export const createAnnouncement = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/announcements/${file.filename}`,
+        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -226,7 +226,7 @@ export const deleteAnnouncement = asyncHandler(async (req, res) => {
   if (announcement.attachments && announcement.attachments.length > 0) {
     for (const attachment of announcement.attachments) {
       if (attachment.publicId) {
-        const filePath = path.join(__dirname, '../../uploads/announcements', attachment.publicId);
+        const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
         if (fs.existsSync(filePath)) {
           try {
             fs.unlinkSync(filePath);
@@ -246,10 +246,143 @@ export const deleteAnnouncement = asyncHandler(async (req, res) => {
   return successResponse(res, 'Announcement deleted successfully');
 });
 
+// Delete attachment from announcement - MULTI-TENANT
+export const deleteAttachment = asyncHandler(async (req, res) => {
+  const { announcementId, attachmentId } = req.params;
+  const teacherId = req.user.id;
+  
+  const announcement = await Announcement.findOne({
+    _id: announcementId,
+    schoolId: req.schoolId
+  });
+  
+  if (!announcement) {
+    throw new NotFoundError('Announcement');
+  }
+  
+  // Check ownership
+  if (announcement.createdBy.toString() !== teacherId.toString()) {
+    throw new ForbiddenError('You can only delete attachments from your own announcements');
+  }
+  
+  const attachment = announcement.attachments.id(attachmentId);
+  if (!attachment) {
+    throw new NotFoundError('Attachment');
+  }
+  
+  if (attachment.publicId) {
+    const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
+    
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log(`🗑️ Deleted file: ${attachment.publicId}`);
+      } catch (err) {
+        console.error(`❌ Error deleting file: ${attachment.publicId}`, err);
+      }
+    }
+  }
+  
+  announcement.attachments.pull(attachmentId);
+  await announcement.save();
+  
+  return successResponse(res, 'Attachment deleted successfully');
+});
+
+// Update announcement - MULTI-TENANT
+export const updateAnnouncement = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const teacherId = req.user.id;
+  const updateData = req.body;
+  
+  const announcement = await Announcement.findOne({
+    _id: id,
+    schoolId: req.schoolId
+  });
+  
+  if (!announcement) {
+    throw new NotFoundError('Announcement');
+  }
+  
+  // Check ownership
+  if (announcement.createdBy.toString() !== teacherId.toString()) {
+    throw new ForbiddenError('You can only update your own announcements');
+  }
+  
+  if (updateData.targetAudience && typeof updateData.targetAudience === 'string') {
+    try {
+      updateData.targetAudience = JSON.parse(updateData.targetAudience);
+    } catch (e) {
+      throw new ValidationError('Invalid target audience format');
+    }
+  }
+  
+  // Handle file uploads
+  if (req.files && req.files.length > 0) {
+    const newAttachments = req.files.map(file => {
+      let fileType = 'raw';
+      if (file.mimetype.startsWith('image/')) fileType = 'image';
+      else if (file.mimetype.startsWith('video/')) fileType = 'video';
+      else if (file.mimetype.includes('pdf') || file.mimetype.includes('document')) fileType = 'document';
+      
+      return {
+        fileName: file.originalname,
+        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
+        publicId: file.filename,
+        fileType,
+        fileSize: file.size
+      };
+    });
+    
+    announcement.attachments.push(...newAttachments);
+  }
+  
+  const allowedFields = ['title', 'content', 'type', 'priority', 'targetAudience', 'publishDate', 'expiryDate'];
+  
+  allowedFields.forEach(field => {
+    if (updateData[field] !== undefined) {
+      announcement[field] = updateData[field];
+    }
+  });
+  
+  await announcement.save();
+  await announcement.populate('targetAudience.specificClasses.class', 'className');
+  
+  return successResponse(res, 'Announcement updated successfully', announcement);
+});
+
+// Toggle pin status - MULTI-TENANT
+export const togglePin = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const teacherId = req.user.id;
+  
+  const announcement = await Announcement.findOne({
+    _id: id,
+    schoolId: req.schoolId
+  });
+  
+  if (!announcement) {
+    throw new NotFoundError('Announcement');
+  }
+  
+  // Check ownership
+  if (announcement.createdBy.toString() !== teacherId.toString()) {
+    throw new ForbiddenError('You can only pin/unpin your own announcements');
+  }
+  
+  announcement.isPinned = !announcement.isPinned;
+  await announcement.save();
+  
+  return successResponse(res, `Announcement ${announcement.isPinned ? 'pinned' : 'unpinned'} successfully`, announcement);
+});
+
 export default {
   getAllAnnouncements,
   getMySections,
   getMyAnnouncements,
   createAnnouncement,
-  deleteAnnouncement
+  deleteAnnouncement,
+  deleteAttachment,
+  updateAnnouncement,
+  togglePin
 };

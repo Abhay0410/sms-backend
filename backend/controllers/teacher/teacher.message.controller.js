@@ -1,12 +1,19 @@
 // controllers/teacher/teacher.message.controller.js
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
-import { ValidationError, NotFoundError } from '../../utils/errors.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/errors.js';
 import Message from '../../models/Message.js';
 import Student from '../../models/Student.js';
 import ClassModel from '../../models/Class.js';
 import Teacher from '../../models/Teacher.js';
 import Parent from '../../models/Parent.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Helper: build participants array
 const buildParticipants = async ({
   schoolId,
@@ -132,7 +139,26 @@ export const createThreadTeacher = asyncHandler(async (req, res) => {
     classId, sectionName, includeStudents, includeParents 
   } = req.body;
 
-  if (!message?.trim()) throw new ValidationError('Message content is required');
+  // Handle file uploads
+  let attachments = [];
+  if (req.files && req.files.length > 0) {
+    attachments = req.files.map(file => {
+      let fileType = 'raw';
+      if (file.mimetype.startsWith('image/')) fileType = 'image';
+      else if (file.mimetype.startsWith('video/')) fileType = 'video';
+      else if (file.mimetype.includes('pdf') || file.mimetype.includes('document')) fileType = 'document';
+      
+      return {
+        fileName: file.originalname,
+        fileUrl: `/uploads/${req.schoolId}/messages/${file.filename}`,
+        publicId: file.filename,
+        fileType,
+        fileSize: file.size
+      };
+    });
+  }
+
+  if (!message?.trim() && attachments.length === 0) throw new ValidationError('Message content or attachment is required');
 
   let participants = await buildParticipants({
     schoolId,
@@ -155,7 +181,8 @@ export const createThreadTeacher = asyncHandler(async (req, res) => {
     messages: [{ 
         senderType: 'teacher', 
         senderId: teacherId, // This was missing causing the error
-        content: message 
+        content: message,
+        attachments
     }],
     createdByType: 'teacher',
     createdById: teacherId, // This was missing causing the error
@@ -198,15 +225,80 @@ export const replyToThreadTeacher = asyncHandler(async (req, res) => {
 
   if (!thread) throw new NotFoundError('Thread not found');
 
+  // Handle file uploads
+  let attachments = [];
+  if (req.files && req.files.length > 0) {
+    attachments = req.files.map(file => {
+      let fileType = 'raw';
+      if (file.mimetype.startsWith('image/')) fileType = 'image';
+      else if (file.mimetype.startsWith('video/')) fileType = 'video';
+      else if (file.mimetype.includes('pdf') || file.mimetype.includes('document')) fileType = 'document';
+      
+      return {
+        fileName: file.originalname,
+        fileUrl: `/uploads/${req.schoolId}/messages/${file.filename}`,
+        publicId: file.filename,
+        fileType,
+        fileSize: file.size
+      };
+    });
+  }
+
   thread.messages.push({ 
     senderType: 'teacher', 
     senderId: teacherId, 
-    content: message 
+    content: message,
+    attachments
   });
   thread.lastMessageAt = new Date();
   await thread.save();
 
   return successResponse(res, "Reply added successfully", thread, 200);
+});
+
+export const deleteMessage = asyncHandler(async (req, res) => {
+  const { threadId, messageId } = req.params;
+  const teacherId = req.user.id;
+  const schoolId = req.schoolId;
+
+  const thread = await Message.findOne({ _id: threadId, schoolId });
+  if (!thread) throw new NotFoundError('Thread not found');
+
+  const message = thread.messages.id(messageId);
+  if (!message) throw new NotFoundError('Message not found');
+
+  // Check ownership
+  if (message.senderId.toString() !== teacherId.toString()) {
+    throw new ForbiddenError('You can only delete your own messages');
+  }
+
+  // Delete attachments
+  if (message.attachments && message.attachments.length > 0) {
+    message.attachments.forEach(att => {
+      if (att.publicId) {
+        const filePath = path.join(__dirname, '../../uploads', schoolId.toString(), 'messages', att.publicId);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch (e) {
+            console.error("Error deleting message attachment:", e);
+          }
+        }
+      }
+    });
+  }
+
+  // Remove message
+  thread.messages.pull(messageId);
+  
+  // Update lastMessageAt if needed
+  if (thread.messages.length > 0) {
+    thread.lastMessageAt = thread.messages[thread.messages.length - 1].createdAt;
+  }
+  
+  await thread.save();
+
+  return successResponse(res, 'Message deleted successfully');
 });
 
 export const searchRecipients = asyncHandler(async (req, res) => {

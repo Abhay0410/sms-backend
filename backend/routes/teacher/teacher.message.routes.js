@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js"; 
+import { uploadMessageAttachments } from "../../middleware/upload.js";
 import {
     createThreadTeacher,
     replyToThreadTeacher,
     getTeacherThreads,
     getThreadByIdTeacher,
     getTeacherSections,
-    searchRecipients
+    searchRecipients,
+    deleteMessage
 } from "../../controllers/teacher/teacher.message.controller.js";
 
 const router = Router();
@@ -16,11 +18,12 @@ router.use(requireAuth(["teacher"]));
 router.get("/", getTeacherThreads);
 router.get("/my-sections", getTeacherSections); // GET /api/teacher/messages/my-sections
 router.get("/search-recipients", searchRecipients);
-router.post("/thread", createThreadTeacher);
+router.post("/thread", uploadMessageAttachments.array("attachments", 5), createThreadTeacher);
 
 // 2. Dynamic Routes (Bottom)
 router.get("/:threadId", getThreadByIdTeacher); // This will only catch if it's NOT "my-sections"
-router.post("/:threadId/reply", replyToThreadTeacher);
+router.post("/:threadId/reply", uploadMessageAttachments.array("attachments", 5), replyToThreadTeacher);
+router.delete("/:threadId/message/:messageId", deleteMessage);
 
 
 

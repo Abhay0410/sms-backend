@@ -8,6 +8,9 @@ import {
   getMyAnnouncements,
   createAnnouncement,
   deleteAnnouncement,
+  deleteAttachment,
+  updateAnnouncement,
+  togglePin
 } from "../../controllers/teacher/teacher.announcement.controller.js";
 
 const router = Router();
@@ -19,12 +22,21 @@ router.use(requireAuth(["teacher"]));
 router.get("/", getAllAnnouncements);
 router.get("/my-sections", getMySections);
 router.get("/my-announcements", getMyAnnouncements);
+router.delete("/attachment/:announcementId/:attachmentId", deleteAttachment);
 
 router.post(
   "/",
   uploadAnnouncementAttachments.array("attachments", 5),
   createAnnouncement
 );
+
+router.put(
+  "/:id",
+  uploadAnnouncementAttachments.array("attachments", 5),
+  updateAnnouncement
+);
+
+router.patch("/:id/toggle-pin", togglePin);
 
 router.delete("/:id", deleteAnnouncement);
 

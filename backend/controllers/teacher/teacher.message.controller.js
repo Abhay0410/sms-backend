@@ -244,10 +244,17 @@ export const replyToThreadTeacher = asyncHandler(async (req, res) => {
     });
   }
 
+  // ✅ FIX: Ensure content is never null/undefined
+  const finalContent = message || (attachments.length > 0 ? "Attachment" : "");
+
+  if (!finalContent && attachments.length === 0) {
+    throw new ValidationError("Message content is required");
+  }
+
   thread.messages.push({ 
     senderType: 'teacher', 
     senderId: teacherId, 
-    content: message,
+    content: finalContent,
     attachments
   });
   thread.lastMessageAt = new Date();

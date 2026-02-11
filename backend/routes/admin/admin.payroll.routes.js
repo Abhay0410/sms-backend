@@ -5,6 +5,7 @@ import {
   getAttendanceStats, 
   runMonthlyPayroll,
   getUnifiedStaffList,
+  getAttendanceMatrix,
   getPayrollSummary,
   getPayrollStructure,
   markPayrollPaid,
@@ -28,6 +29,7 @@ const router = Router();
 router.get('/attendance-stats', requireAuth(['admin']), getAttendanceStats);
 router.get('/staff-list', requireAuth(['admin']), getUnifiedStaffList);
 router.get('/summary', requireAuth(['admin']), getPayrollSummary);
+router.get('/matrix', requireAuth(['admin']), getAttendanceMatrix);
 
 // 2. Generation Routes
 // ✅ Ensure this matches what the Frontend is calling via the Constant

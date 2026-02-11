@@ -25,6 +25,9 @@ export const markAttendance = asyncHandler(async (req, res) => {
     period,
     attendance,
     academicYear,
+    latitude,
+    longitude,
+    accuracy
   } = req.body;
 
   if (!date || !classId || !sectionId || !attendance || !academicYear) {
@@ -70,6 +73,11 @@ export const markAttendance = asyncHandler(async (req, res) => {
     existing.totalStudents = totalStudents;
     existing.subject = subject || existing.subject;
     existing.markedBy = teacherId;
+
+    if (latitude && longitude) {
+      existing.location = { latitude, longitude, accuracy };
+    }
+
     await existing.save();
     return successResponse(res, 'Attendance updated successfully', existing);
   }
@@ -88,6 +96,7 @@ export const markAttendance = asyncHandler(async (req, res) => {
     totalStudents,
     markedBy: teacherId,
     academicYear,
+    location: (latitude && longitude) ? { latitude, longitude, accuracy } : undefined
   });
 
   return successResponse(res, 'Attendance marked successfully', newAttendance);

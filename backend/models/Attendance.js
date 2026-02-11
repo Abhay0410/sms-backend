@@ -32,6 +32,11 @@ const attendanceSchema = new mongoose.Schema({
   totalPresent: { type: Number, default: 0 },
   totalAbsent: { type: Number, default: 0 },
   totalStudents: { type: Number, required: true },
+  location: {
+    latitude: Number,
+    longitude: Number,
+    accuracy: Number
+  }
 }, { timestamps: true });
 
 attendanceSchema.index({ schoolId: 1 });

@@ -10,8 +10,12 @@ const teacherSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true },
   teacherID: { type: String, required: true, unique: true },
-  
+
   department: { type: String },
+
+  
+  profilePicture: { type: String, default: '' },
+  profilePicturePublicId: { type: String, default: '' },
 
   // Address
   address: {

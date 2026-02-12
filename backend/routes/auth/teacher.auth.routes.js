@@ -38,7 +38,7 @@ router.get("/debug-token", (req, res) => {
 // Protected routes
 router.post("/validate", requireAuth(["teacher"]), validate);
 router.get("/profile", requireAuth(["teacher"]), profile);
-router.put("/profile", requireAuth(["teacher"]), upload.single("photo"), updateProfile);
+router.put("/update-profile", requireAuth(["teacher"]), upload.single("profilePicture"), updateProfile);
 router.put("/change-password", requireAuth(["teacher"]), changePassword);
 router.post("/logout", requireAuth(["teacher"]), logout);
 

@@ -551,6 +551,11 @@ export const updateStudent = asyncHandler(async (req, res) => {
   delete updateData.role;
   delete updateData.schoolId;  // Prevent school change
   
+ // ✅ Handle profile picture upload
+  if (req.file) {
+    updateData.profilePicture = `uploads/${req.schoolId}/students/${req.file.filename}`;
+  }
+
   const student = await Student.findOneAndUpdate(
     { 
       _id: studentId,

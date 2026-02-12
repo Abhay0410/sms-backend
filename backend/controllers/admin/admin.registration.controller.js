@@ -109,7 +109,10 @@ if (address) {
     return res.status(HTTP_STATUS.CREATED).json({
   success: true,
   message: "Admin registered successfully",
-  data: admin, // send the whole admin object
+  data: {
+   adminID,
+    password: passwordPlain,
+    }  // send the whole admin object
 });
 
   } catch (error) {

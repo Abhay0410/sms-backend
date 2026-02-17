@@ -690,6 +690,51 @@ export const getPayrollDetails = asyncHandler(async (req, res) => {
   return successResponse(res, "Slip details retrieved", { slip, staff });
 });
 
+// ✅ GET: Fetch monthly matrix for all staff
+export const getAttendanceMatrix = asyncHandler(async (req, res) => {
+  const { month, year } = req.query;
+  const schoolId = req.schoolId;
+
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
+
+  // 1. Saare active staff le aao
+  const teachers = await Teacher.find({ schoolId, isActive: true }).select('name teacherID').lean();
+  const admins = await Admin.find({ schoolId, isActive: true }).select('name adminID').lean();
+  const allStaff = [...teachers, ...admins];
+
+  // 2. Iss mahine ke saare attendance records fetch karo
+  const attendanceRecords = await StaffAttendance.find({
+    schoolId,
+    date: { $gte: startDate, $lte: endDate }
+  }).lean();
+
+  // 3. Matrix structure taiyar karo
+  const matrix = allStaff.map(staff => {
+    const staffAttendance = {};
+    
+    // Har staff ke liye records ko date ke hisaab se map karo
+    attendanceRecords
+      .filter(r => r.teacherId.toString() === staff._id.toString())
+      .forEach(r => {
+        const dateKey = new Date(r.date).getDate(); // Get day 1, 2, 3...
+        staffAttendance[dateKey] = r.status; // PRESENT, ABSENT, etc.
+      });
+
+    return {
+      _id: staff._id,
+      name: staff.name,
+      displayID: staff.teacherID || staff.adminID,
+      attendance: staffAttendance
+    };
+  });
+
+  return successResponse(res, "Matrix retrieved", {
+    daysInMonth: new Date(year, month, 0).getDate(),
+    matrix
+  });
+});
+
 // ✅ GET: Download salary slip as PDF (Refined & Fixed)
 export const downloadSalarySlip = asyncHandler(async (req, res) => {
     const { slipId } = req.params;
@@ -859,6 +904,7 @@ export default {
   getPayrollDetails,
   downloadSalarySlip,
   getMySalaryHistory,
+  getAttendanceMatrix,
   updateSchoolPayrollPolicy,
   getSchoolPayrollPolicy
 };

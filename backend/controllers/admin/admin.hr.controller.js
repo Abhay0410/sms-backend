@@ -101,7 +101,9 @@ export const updateStaffAttendance = asyncHandler(async (req, res) => {
 // Get all leave requests for the school (Admin View)
 export const getAllLeaves = asyncHandler(async (req, res) => {
     const leaves = await LeaveRequest.find({ schoolId: req.schoolId })
-        .populate('teacherId', 'name teacherID department') // 👈 Crucial for the UI
+        // .populate('teacherId', 'name teacherID department') // 👈 Crucial for the UI
+        .populate('teacherId', 'name teacherID department profilePicture schoolId')
+
         .sort({ createdAt: -1 });
 
     return successResponse(res, 'All leave requests retrieved', leaves);

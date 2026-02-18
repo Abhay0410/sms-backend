@@ -6,6 +6,8 @@ import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
+import { uploadToCloudinary } from '../../utils/cloudinaryUpload.js';
+
 
 // Get all teachers (FRONTEND COMPATIBLE) - MULTI-TENANT
 export const getAllTeachers = asyncHandler(async (req, res) => {
@@ -137,6 +139,21 @@ export const createTeacher = asyncHandler(async (req, res) => {
   const hashedPassword = password ? 
     await bcrypt.hash(password, 10) : 
     await bcrypt.hash(defaultPassword, 10);
+
+    // 🖼️ PROFILE PICTURE UPLOAD (Admin jaisa)
+let profilePicture = '';
+let profilePicturePublicId = '';
+
+if (req.file) {
+  const cloudRes = await uploadToCloudinary(
+    req.file.path,
+    'sms/teachers'
+  );
+
+  profilePicture = cloudRes.url;
+  profilePicturePublicId = cloudRes.publicId;
+}
+
   
   const teacher = new Teacher({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
@@ -147,6 +164,8 @@ export const createTeacher = asyncHandler(async (req, res) => {
     phone,
     dateOfBirth,
     department,
+    profilePicture,
+    profilePicturePublicId,
     panNumber, // ✅ ADD THIS LINE - Iske bina save nahi hoga
     gender,
     address,
@@ -188,6 +207,17 @@ export const updateTeacher = asyncHandler(async (req, res) => {
   delete updateData.teacherID;
   delete updateData.role;
   delete updateData.schoolId;  // Prevent school change
+
+  // 🖼️ PROFILE PICTURE UPDATE (🔥 MISSING PART)
+  if (req.file) {
+    const cloud = await uploadToCloudinary(
+      req.file.path,
+      'sms/teachers'
+    );
+
+    updateData.profilePicture = cloud.url;
+    updateData.profilePicturePublicId = cloud.publicId;
+  }
   
   const teacher = await Teacher.findOneAndUpdate(
     { 

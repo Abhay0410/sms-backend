@@ -12,6 +12,7 @@ import {
   updateStudentStatus,
   promoteStudents
 } from "../../controllers/admin/admin.student.controller.js";
+import upload from "../../middleware/multer.js";
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.get("/:studentId", getStudentById);
 router.post("/", createStudent); // Simple create
 router.post("/with-parent", createStudentWithParent); // ✅ Full registration
 
-router.put("/:studentId", updateStudent);
+router.put("/:studentId",upload.single("profilePicture"), updateStudent);
 router.delete("/:studentId", deleteStudent);
 router.post("/bulk-upload", bulkUploadStudents);
 router.put("/:studentId/status", updateStudentStatus);

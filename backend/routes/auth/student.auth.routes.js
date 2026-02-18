@@ -19,7 +19,7 @@ router.post("/validate", validateToken);
 
 // Protected routes - INDIVIDUAL middleware (no use())
 router.get("/profile", requireAuth(["student"]), getProfile);
-router.put("/profile", requireAuth(["student"]), upload.single("photo"), updateProfile);
+router.put("/profile", requireAuth(["student"]), upload.single("profilePicture"), updateProfile);
 router.put("/change-password", requireAuth(["student"]), changePassword);
 router.post("/logout", requireAuth(["student"]), logout);
 

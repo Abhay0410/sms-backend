@@ -32,6 +32,11 @@ const studentSchema = new mongoose.Schema({
     pincode: String,
     country: { type: String, default: 'India' }
   },
+  parent: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Parent"
+},
+
   
   // Parents/Guardian Info
   fatherName: { type: String, required: true },

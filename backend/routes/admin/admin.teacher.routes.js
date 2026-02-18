@@ -1,6 +1,7 @@
 // routes/admin/admin.teacher.routes.js
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
+import upload from "../../middleware/multer.js";
 import {
   createTeacher,
   getTeachers,
@@ -22,12 +23,14 @@ console.log("🔧 Admin teacher routes loading...");
 router.use(requireAuth(["admin"]));
 
 // Teacher CRUD
-router.post("/", createTeacher);
-router.post("/create", createTeacher); // Alias for backward compatibility
+// router.post("/", createTeacher);
+// router.post("/create", createTeacher); // Alias for backward compatibility
+router.post("/", upload.single("profilePicture"), createTeacher);
+router.post("/create", upload.single("profilePicture"), createTeacher);
 router.get("/", getAllTeachers);
 router.get("/list", getTeachers); // Alias for backward compatibility
 router.get("/:teacherId", getTeacherById);
-router.put("/:teacherId", updateTeacher);
+router.put("/:teacherId", upload.single("profilePicture"), updateTeacher);
 router.delete("/:teacherId", deleteTeacher);
 
 // Teacher assignments

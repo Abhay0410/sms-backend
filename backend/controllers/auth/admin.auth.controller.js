@@ -131,8 +131,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
   }
 
   if (req.file) {
-    updates.profilePicture = req.file.filename;
-    console.log("✅ Profile picture uploaded:", req.file.filename);
+    updates.profilePicture = req.file.path;
+    updates.profilePicturePublicId = req.file.filename;
+    console.log("✅ Profile picture uploaded:", req.file.path);
   }
 
   // ✅ MULTI-TENANT: Update only own school's admin

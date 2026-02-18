@@ -189,8 +189,8 @@ export const updateProfile = asyncHandler(async (req, res) => {
   });
 
   if (req.file) {
-    parent.profilePicture = req.file.filename;
-    console.log("✅ Parent profile picture uploaded:", req.file.filename);
+    parent.profilePicture = req.file.path;
+    console.log("✅ Parent profile picture uploaded:", req.file.path);
   }
 
   await parent.save();

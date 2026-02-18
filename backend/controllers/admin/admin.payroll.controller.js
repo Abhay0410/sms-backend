@@ -699,8 +699,8 @@ export const getAttendanceMatrix = asyncHandler(async (req, res) => {
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
   // 1. Saare active staff le aao
-  const teachers = await Teacher.find({ schoolId, isActive: true }).select('name teacherID').lean();
-  const admins = await Admin.find({ schoolId, isActive: true }).select('name adminID').lean();
+  const teachers = await Teacher.find({ schoolId, isActive: true }).select('name teacherID profilePicture').lean();
+  const admins = await Admin.find({ schoolId, isActive: true }).select('name adminID profilePicture').lean();
   const allStaff = [...teachers, ...admins];
 
   // 2. Iss mahine ke saare attendance records fetch karo
@@ -725,6 +725,8 @@ export const getAttendanceMatrix = asyncHandler(async (req, res) => {
       _id: staff._id,
       name: staff.name,
       displayID: staff.teacherID || staff.adminID,
+      profilePicture: staff.profilePicture,
+      schoolId: schoolId,
       attendance: staffAttendance
     };
   });

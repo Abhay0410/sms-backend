@@ -2,6 +2,8 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import cloudinary from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,16 +63,16 @@ const documentFilter = (req, file, cb) => {
 // ========================================
 
 // Profile Storage ✅ UPDATED FOR MULTI-TENANCY
-const profileStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
+const profileStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
     const schoolId = req.schoolId || "generic";
-    const roleFolder = req.user?.role ? `${req.user.role}s` : "students";
-    const uploadPath = ensureSchoolDir(schoolId, roleFolder);
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, `${req.user?.role || "user"}-${uniqueSuffix}${path.extname(file.originalname)}`);
+    const role = req.user?.role || "user";
+    return {
+      folder: `sms/${schoolId}/${role}s`,
+      public_id: `${role}-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    };
   },
 });
 

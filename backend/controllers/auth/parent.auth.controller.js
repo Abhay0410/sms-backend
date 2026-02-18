@@ -48,7 +48,7 @@ export const login = asyncHandler(async (req, res) => {
     schoolId // This ensures parent can only login to their own school
   })
     .select("+password")
-    .populate('children', 'name studentID className section status');
+    .populate('children', 'name studentID className section status  profilePicture schoolId');
   
   if (!parent) {
     throw new AuthenticationError("Invalid credentials for this institution.");
@@ -100,7 +100,7 @@ export const validate = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
     schoolId: req.schoolId // ✅ Verify school match
-  }).populate('children', 'name studentID className section status');
+  }).populate('children', 'name studentID className section status profilePicture');
   
   if (!parent) {
     throw new NotFoundError("Parent not found in this institution");
@@ -122,7 +122,7 @@ export const profile = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
     schoolId: req.schoolId // ✅ Verify school match
-  }).populate('children', 'name studentID className section status rollNumber email phone');
+  }).populate('children', 'name studentID className section status rollNumber email phone profilePicture');
   
   if (!parent) {
     throw new NotFoundError("Parent not found in this institution");
@@ -140,7 +140,7 @@ export const getChildren = asyncHandler(async (req, res) => {
     schoolId: req.schoolId // ✅ Verify school match
   }).populate({
     path: 'children',
-    select: 'name studentID className section status rollNumber email phone profilePicture academicYear',
+    select: 'name studentID className section status rollNumber email phone profilePicture academicYear schoolId',
     match: { schoolId: req.schoolId } // ✅ Ensure children belong to same school
   });
 

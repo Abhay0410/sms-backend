@@ -470,6 +470,13 @@ export const createStudent = asyncHandler(async (req, res) => {
     address, className, section, academicYear, rollNumber, admissionDate
   } = req.body;
   
+
+  // ✅ Handle profile picture
+let profilePicture = null;
+if (req.file) {
+  profilePicture = req.file.filename;  // only filename save
+}
+
   if (!name || !fatherName || !className || !academicYear) {
     throw new ValidationError('Name, father name, class, and academic year are required');
   }
@@ -500,6 +507,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   const student = new Student({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name,
+    profilePicture,
     email,
     password: hashedPassword,
     studentID,
@@ -553,7 +561,7 @@ export const updateStudent = asyncHandler(async (req, res) => {
   
  // ✅ Handle profile picture upload
   if (req.file) {
-    updateData.profilePicture = `uploads/${req.schoolId}/students/${req.file.filename}`;
+    updateData.profilePicture = req.file.filename;
   }
 
   const student = await Student.findOneAndUpdate(

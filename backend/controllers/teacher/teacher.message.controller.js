@@ -23,7 +23,12 @@ const buildParticipants = async ({
   const participants = [];
 
   if (mode === 'single') {
-    const { studentIds = [], parentIds = [] } = targets;
+    let { studentIds = [], parentIds = [] } = targets;
+
+    // ✅ FIX: Ensure studentIds/parentIds are arrays (handle single string from multipart/form-data)
+    if (!Array.isArray(studentIds)) studentIds = studentIds ? [studentIds] : [];
+    if (!Array.isArray(parentIds)) parentIds = parentIds ? [parentIds] : [];
+
     studentIds.forEach(id => {
       participants.push({ userType: 'student', userTypeRef: 'Student', userId: id });
     });

@@ -35,7 +35,11 @@ export const registerAdmin = async (req, res) => {
     if (existing) throw new ValidationError("Admin already exists");
 
     // 🔐 password
-    const passwordPlain = `Admin@${Math.floor(100 + Math.random() * 900)}`;
+    let passwordPlain;
+    if (designation === 'Librarian') passwordPlain = `Lib@${Math.floor(1000 + Math.random() * 9000)}`;
+    else if (designation === 'Accountant') passwordPlain = `Acc@${Math.floor(1000 + Math.random() * 9000)}`;
+    else passwordPlain = `Admin@${Math.floor(100 + Math.random() * 900)}`;
+
     const passwordHash = await bcrypt.hash(passwordPlain, 10);
 
     // 🆔 adminID
@@ -78,7 +82,7 @@ if (address) {
         ? new Date(joiningDate)
         : new Date();
 
-    const isSuperAdminParsed = req.body.isSuperAdmin === "true";
+    const isSuperAdminParsed = req.body.isSuperAdmin === "true" || req.body.isSuperAdmin === true;
 
     const admin = await Admin.create({
       name,

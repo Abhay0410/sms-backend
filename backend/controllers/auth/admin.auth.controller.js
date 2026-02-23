@@ -59,6 +59,7 @@ export const login = asyncHandler(async (req, res) => {
   const token = signToken({ 
     id: admin._id.toString(), 
     role: "admin", 
+    designation: admin.designation, // ✅ Track specifically who they are
     schoolId: admin.schoolId.toString(), // Ensure string format
     isSuperAdmin: admin.isSuperAdmin || false
   });
@@ -77,6 +78,7 @@ export const login = asyncHandler(async (req, res) => {
     {
       token,
       role: "admin",
+      designation: admin.designation, // ✅ Frontend isse tabs filter karega
       schoolId: admin.schoolId,
       admin: safeAdmin(admin),
     }

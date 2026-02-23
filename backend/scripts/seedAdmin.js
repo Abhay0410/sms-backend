@@ -66,6 +66,30 @@ const seedAdmin = async () => {
         ],
         role: 'admin',
         isActive: true,
+      },
+      {
+        name: 'School Librarian',
+        email: 'library@school.com',
+        password: hashedPassword,
+        adminID: 'ADM0003',
+        phone: '9876543212',
+        designation: 'Librarian', // 👈 This matches the visibility rule
+        department: 'Library',
+        isSuperAdmin: false,
+        role: 'admin',
+        isActive: true,
+      },
+      {
+        name: 'School Accountant',
+        email: 'accounts@school.com',
+        password: hashedPassword,
+        adminID: 'ADM0004',
+        phone: '9876543213',
+        designation: 'Accountant', // 👈 This matches the visibility rule
+        department: 'Accounts',
+        isSuperAdmin: false,
+        role: 'admin',
+        isActive: true,
       }
     ];
 

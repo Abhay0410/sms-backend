@@ -99,12 +99,107 @@ export const updateStaffAttendance = asyncHandler(async (req, res) => {
     return successResponse(res, 'Status updated successfully', record);
 });
 // Get all leave requests for the school (Admin View)
+// export const getAllLeaves = asyncHandler(async (req, res) => {
+//     const leaves = await LeaveRequest.find({ schoolId: req.schoolId })
+//         // .populate('teacherId', 'name teacherID department') // 👈 Crucial for the UI
+//         .populate('teacherId', 'name teacherID department profilePicture schoolId')
+
+//         .sort({ createdAt: -1 });
+
+//     return successResponse(res, 'All leave requests retrieved', leaves);
+// });
+
 export const getAllLeaves = asyncHandler(async (req, res) => {
-    const leaves = await LeaveRequest.find({ schoolId: req.schoolId })
-        // .populate('teacherId', 'name teacherID department') // 👈 Crucial for the UI
-        .populate('teacherId', 'name teacherID department profilePicture schoolId')
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    leaveType,
+    search
+  } = req.query;
 
-        .sort({ createdAt: -1 });
+  const schoolId = req.schoolId;
 
-    return successResponse(res, 'All leave requests retrieved', leaves);
+  const filter = { schoolId };
+
+  // Status filter
+  if (status && status !== "ALL") {
+    filter.status = status;
+  }
+
+  // Leave type filter
+  if (leaveType && leaveType !== "ALL") {
+    filter.leaveType = leaveType;
+  }
+
+  // Search filter (teacher name, reason, teacherID)
+  if (search) {
+    filter.$or = [
+      { reason: { $regex: search, $options: "i" } }
+    ];
+  }
+
+  const options = {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    sort: { createdAt: -1 },
+    populate: {
+      path: "teacherId",
+      select: "name teacherID department profilePicture schoolId"
+    },
+    lean: true
+  };
+
+  const leaves = await LeaveRequest.paginate(filter, options);
+
+  return successResponse(res, "All leave requests retrieved", {
+    leaves: leaves.docs,
+    pagination: {
+      current: leaves.page,
+      pages: leaves.totalPages,
+      total: leaves.totalDocs
+    }
+  });
 });
+//     const { page = 1, limit = 5, status, search } = req.query;
+
+//     const currentPage = parseInt(page);
+//     const perPage = parseInt(limit);
+//     const skip = (currentPage - 1) * perPage;
+
+//     // 🔹 Filter Object
+//     const filter = { schoolId: req.schoolId };
+
+//     if (status && status !== "ALL") {
+//         filter.status = status;
+//     }
+
+//     // 🔹 Search by Teacher Name
+//     if (search) {
+//         const teachers = await Teacher.find({
+//             name: { $regex: search, $options: "i" },
+//             schoolId: req.schoolId,
+//         }).select("_id");
+
+//         filter.teacherId = { $in: teachers.map(t => t._id) };
+//     }
+
+//     // 🔹 Total Count
+//     const total = await LeaveRequest.countDocuments(filter);
+
+//     // 🔹 Paginated Data
+//     const leaves = await LeaveRequest.find(filter)
+//         .populate('teacherId', 'name teacherID department profilePicture')
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(perPage);
+
+//     return successResponse(res, "All leave requests retrieved", {
+//         leaves,
+//         pagination: {
+//             current: currentPage,
+//             pages: Math.ceil(total / perPage),
+//             total,
+//         },
+//     });
+// });

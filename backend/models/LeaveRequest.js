@@ -1,5 +1,9 @@
 import mongoose from 'mongoose'; 
 
+import mongoosePaginate from "mongoose-paginate-v2";
+
+
+
 const leaveRequestSchema = new mongoose.Schema({
   schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
   teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
@@ -10,5 +14,7 @@ const leaveRequestSchema = new mongoose.Schema({
   status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
   adminRemarks: String
 }, { timestamps: true });
+
+leaveRequestSchema.plugin(mongoosePaginate);
 
 export default mongoose.model('LeaveRequest', leaveRequestSchema);

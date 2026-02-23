@@ -146,6 +146,10 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     transportRequired, busRoute, pickupPoint,
     hostelResident, hostelBlock, roomNumber
   } = req.body;
+
+    // dateOfBirth: new Date(req.body.dateOfBirth),
+  
+
   
   console.log("📝 Received student registration data:", {
     studentName,
@@ -469,6 +473,8 @@ export const createStudent = asyncHandler(async (req, res) => {
     motherName, motherPhone, motherEmail,
     address, className, section, academicYear, rollNumber, admissionDate
   } = req.body;
+
+  
   
 
   // ✅ Handle profile picture

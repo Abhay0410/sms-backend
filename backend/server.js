@@ -50,6 +50,7 @@ import adminHRRoutes from "./routes/admin/admin.hr.routes.js";
 import teacherHRRoutes from "./routes/teacher/teacher.hr.routes.js";
 import teacherPayrollRoutes from "./routes/admin/admin.payroll.routes.js";
 import adminLibraryRoutes from "./routes/admin/admin.library.routes.js";
+import adminOnboardingRoutes from "./routes/admin/onboarding.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -188,6 +189,7 @@ app.use("/api/parent/timetable", parentTimetableRoutes);
 app.use("/api/parent/messages", parentMessageRoutes);
 
 app.use("/api/admin/library", adminLibraryRoutes);
+app.use("/api/admin/onboarding", adminOnboardingRoutes);
 
 if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");

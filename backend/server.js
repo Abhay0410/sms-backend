@@ -137,6 +137,7 @@ async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("✅ MongoDB Connected");
+    console.log("Connected DB:", mongoose.connection.name);
   } catch (err) {
     console.error("❌ DB Error:", err.message);
     if (isProd) setTimeout(connectDB, 5000);

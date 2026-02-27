@@ -17,6 +17,30 @@ const getVal = (row, keyName) => {
   return foundKey ? row[foundKey].trim() : "";
 };
 
+// ✅ NEW HELPER: Robust Class Finder
+async function findClassRobust(schoolId, className, academicYear) {
+  if (!className) return null;
+  
+  // 1. Exact string match
+  let cls = await Class.findOne({ schoolId, className, academicYear });
+  if (cls) return cls;
+
+  // 2. Try with "Class " prefix if missing (e.g. CSV has "10", DB has "Class 10")
+  if (!className.toLowerCase().startsWith('class')) {
+    cls = await Class.findOne({ schoolId, className: `Class ${className}`, academicYear });
+    if (cls) return cls;
+  }
+
+  // 3. Try numeric match (e.g. CSV has "Ten" or "10", DB has classNumeric 10)
+  const num = parseInt(className.replace(/\D/g, ''));
+  if (!isNaN(num)) {
+    cls = await Class.findOne({ schoolId, classNumeric: num, academicYear });
+    if (cls) return cls;
+  }
+
+  return null;
+}
+
 // ============================================================
 // 1. IMPORT ACADEMICS (Robust Version)
 // ============================================================
@@ -175,16 +199,17 @@ export const importStudents = asyncHandler(async (req, res) => {
             const section = getVal(row, 'Section');
             const parentPhone = getVal(row, 'ParentPhone');
             const parentName = getVal(row, 'ParentName');
+            const rollNumber = getVal(row, 'RollNumber'); // ✅ Extract Roll Number
 
             if (!studentID || !className || !parentName) {
               results.errors.push(`Row missing ID, Class or Parent Name`);
               continue;
             }
 
-            // 1. Validate Target Class
-            const targetClass = await Class.findOne({ schoolId, className, academicYear });
+            // 1. Validate Target Class (ROBUST LOOKUP)
+            const targetClass = await findClassRobust(schoolId, className, academicYear);
             if (!targetClass) {
-              results.errors.push(`${studentID}: Class ${className} not found`);
+              results.errors.push(`${studentID}: Class '${className}' not found for year ${academicYear}`);
               continue;
             }
 
@@ -216,8 +241,9 @@ export const importStudents = asyncHandler(async (req, res) => {
               email: getVal(row, 'Email') || `${studentID}@school.com`,
               password: pass,
               class: targetClass._id,
-              className,
+              className: targetClass.className, // ✅ Use normalized name from DB
               section,
+              rollNumber: rollNumber ? parseInt(rollNumber) : undefined, // ✅ Save Roll Number
               academicYear,
               parent: parent._id, // ✅ Fixed: parentId -> parent
               gender: getVal(row, 'Gender'),
@@ -233,7 +259,7 @@ export const importStudents = asyncHandler(async (req, res) => {
               const totalDue = installments.reduce((sum, i) => sum + i.amount, 0);
               await FeePayment.create({
                 schoolId, student: newStudent._id, studentName: newStudent.name,
-                studentID, className, section, academicYear,
+                studentID, className: targetClass.className, section, academicYear,
                 installments, totalDue, totalAmount: totalDue, balancePending: totalDue,
                 status: 'PENDING'
               });

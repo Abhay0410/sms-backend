@@ -1,10 +1,26 @@
 // controllers/admin/admin.student.management.controller.js - MULTI-TENANT VERSION
 import Student from '../../models/Student.js';
 import Class from '../../models/Class.js';
+import Result from '../../models/Result.js';
 import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
+
+// Helper to find class by name/numeric
+async function findClassByName(className, academicYear, schoolId) {
+  let classDoc = await Class.findOne({ className, academicYear, schoolId });
+  if (!classDoc) {
+    classDoc = await Class.findOne({ className: `Class ${className}`, academicYear, schoolId });
+  }
+  if (!classDoc) {
+    const num = parseInt(className);
+    if (!isNaN(num)) {
+      classDoc = await Class.findOne({ classNumeric: num, academicYear, schoolId });
+    }
+  }
+  return classDoc;
+}
 
 // Get students with advanced management filters - MULTI-TENANT
 export const getStudentsManagement = asyncHandler(async (req, res) => {
@@ -63,7 +79,7 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
   else if (sortBy === 'admissionDate') sort = { admissionDate: -1 };
   else if (sortBy === 'className') sort = { className: 1, section: 1, rollNumber: 1 };
   
-  const [students, total] = await Promise.all([
+  const [studentsRaw, total] = await Promise.all([
     Student.find(filter)
       .populate('class', 'className sections')
       .select('-password')
@@ -73,7 +89,33 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
     Student.countDocuments(filter)
   ]);
   
-  return paginatedResponse(res, 'Students retrieved successfully', students, page, limit, total);
+  // 🔥 CORE LOGIC: Link FINAL Result with each student
+  const students = await Promise.all(studentsRaw.map(async (student) => {
+    const finalResult = await Result.findOne({
+      student: student._id,
+      schoolId: req.schoolId,
+      academicYear: student.academicYear,
+      examType: 'FINAL' // 🎯 Sirf final exam check karega
+    }).select('result overallPercentage overallGrade isPublished');
+
+    return {
+      ...student.toObject(),
+      finalResult: finalResult || null // Frontend isse badge dikhayega
+    };
+  }));
+  
+  // ✅ FIX: Return structure matching frontend expectations (students & pagination at root)
+  return res.status(200).json({
+    success: true,
+    message: 'Students fetched',
+    students,
+    pagination: {
+      currentPage: parseInt(page),
+      perPage: parseInt(limit),
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
 });
 
 // Get student statistics - MULTI-TENANT
@@ -170,13 +212,28 @@ export const bulkUpdateStatus = asyncHandler(async (req, res) => {
 
 // Promote students to next class - MULTI-TENANT
 export const promoteStudents = asyncHandler(async (req, res) => {
-  const { 
+  let { 
     studentIds, 
     sourceClassId, 
     targetClassId, 
     targetSection, 
-    targetAcademicYear 
+    targetAcademicYear,
+    newClassName,    // From frontend
+    newAcademicYear  // From frontend
   } = req.body;
+  
+  // Handle frontend payload format
+  if (newAcademicYear) targetAcademicYear = newAcademicYear;
+  
+  // If targetClassId is missing, try to find it using newClassName
+  if (!targetClassId && newClassName) {
+    const classDoc = await findClassByName(newClassName, targetAcademicYear, req.schoolId);
+    if (classDoc) {
+      targetClassId = classDoc._id;
+    } else {
+      throw new ValidationError(`Target class "${newClassName}" not found for academic year ${targetAcademicYear}`);
+    }
+  }
   
   if (!targetClassId || !targetAcademicYear) {
     throw new ValidationError('Target class and academic year are required');

@@ -35,7 +35,33 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
   };
   
   // Basic filters
-  if (className) filter.className = className;
+  // if (className) filter.className = className;
+  if (className) {
+    const classDoc = await Class.findOne({
+      schoolId: req.schoolId,
+      academicYear,
+      $or: [
+        { className: className },
+        { className: `Class ${className}` }
+      ]
+    });
+
+    if (classDoc) {
+      filter.class = classDoc._id;   // ✅ Correct filtering
+    } else {
+      return res.status(200).json({
+        success: true,
+        message: "No students found",
+        students: [],
+        pagination: {
+          currentPage: parseInt(page),
+          perPage: parseInt(limit),
+          total: 0,
+          totalPages: 0
+        }
+      });
+    }
+  }
   if (section) filter.section = section;
   if (academicYear) filter.academicYear = academicYear;
   if (status) filter.status = status;
@@ -117,6 +143,45 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
     }
   });
 });
+// export const getStudentsManagement = async (req, res) => {
+//   try {
+//     const { className, academicYear, page = 1, limit = 10 } = req.query;
+
+//     let filter = { schoolId: req.schoolId };
+
+//     // 🔥 YAHAN replace karo
+//     if (className) {
+//       const classDoc = await findClassByName(
+//         className,
+//         academicYear,
+//         req.schoolId
+//       );
+
+//       if (classDoc) {
+//         filter.class = classDoc._id;   // ✅ correct filtering
+//       } else {
+//         return res.status(200).json({
+//           success: true,
+//           message: "No students found",
+//           students: [],
+//           pagination: {
+//             currentPage: parseInt(page),
+//             perPage: parseInt(limit),
+//             total: 0,
+//             totalPages: 0
+//           }
+//         });
+//       }
+//     }
+
+//     const students = await Student.find(filter);
+
+//     res.status(200).json({ success: true, students });
+
+//   } catch (error) {
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// };
 
 // Get student statistics - MULTI-TENANT
 export const getStudentStatistics = asyncHandler(async (req, res) => {

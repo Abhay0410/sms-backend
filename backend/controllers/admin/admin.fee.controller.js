@@ -14,7 +14,7 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  const { academicYear, search, status, classId,month, page = 1, limit = 50 } = req.query;
+  const { academicYear, search, status, month } = req.query;
   const schoolId = req.schoolId;
 
   let filter = { schoolId, academicYear, role: 'student' };
@@ -25,39 +25,40 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
-      { studentID: { $regex: search, $options: 'i' } },
-      { className: { $regex: search, $options: 'i' } },
+      { studentID: { $regex: search, $options: 'i' } }
     ];
   }
 
-  const students = await Student.paginate(filter, { page: parseInt(page), limit: parseInt(limit), lean: true });
+  // ✅ Saare students le aao taaki count mismatch na ho (ya limit badha do)
+  const students = await Student.find(filter).lean();
   const studentsWithFees = [];
   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
-  for (const student of students.docs) {
+  for (const student of students) {
     const fp = await FeePayment.findOne({ student: student._id, academicYear, schoolId }).lean();
     if (!fp) continue;
 
+    let isPaidInContext = false;
     let dPaid = fp.totalPaid, dTotal = fp.totalDue, dStatus = fp.status;
 
     if (monthPrefix) {
-      // 🔥 EXACT MATCH FIX: Find the specific month (e.g., JAN)
       const target = fp.installments.find(i => i.name.toUpperCase().startsWith(monthPrefix));
       if (target) {
         dPaid = target.paidAmount; 
         dTotal = target.amount; 
         dStatus = target.status;
+        isPaidInContext = (dStatus === "PAID" || dPaid >= dTotal);
       } else {
-        // If the student doesn't have an installment for this specific month
-        dPaid = 0; dTotal = 0; dStatus = "N/A";
+        continue; // Student has no fee for this month, skip
       }
+    } else {
+      // 📊 YEARLY: Check if total balance is 0
+      isPaidInContext = (fp.totalPaid >= fp.totalDue && fp.totalDue > 0);
     }
 
-    // Filter Logic: A student is "Paid" for the selected context (Month or Year)
-    const isActuallyPaid = dStatus === "PAID" || (dTotal > 0 && dPaid >= dTotal);
-    
-    if (status === "paid" && !isActuallyPaid) continue;
-    if (status === "unpaid" && isActuallyPaid) continue;
+    // ✅ STRICT SYNC WITH STATS
+    if (status === "paid" && !isPaidInContext) continue;
+    if (status === "unpaid" && isPaidInContext) continue;
 
     studentsWithFees.push({
       ...student,
@@ -65,15 +66,13 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
         totalFee: dTotal,
         paidAmount: dPaid,
         pendingAmount: Math.max(0, dTotal - dPaid),
-        status: isActuallyPaid ? "PAID" : dStatus,
+        status: isPaidInContext ? "PAID" : dStatus,
         installments: fp.installments
       }
     });
   }
-  return successResponse(res, "Fetched", { 
-    students: studentsWithFees, 
-    pagination: { current: students.page, pages: students.totalPages, total: students.totalDocs } 
-  });
+  
+  return successResponse(res, "Fetched", { students: studentsWithFees });
 });
 
 export const createFeeHead = asyncHandler(async (req, res) => {
@@ -508,53 +507,27 @@ export const getFeeStatistics = asyncHandler(async (req, res) => {
   const { academicYear, month, classId } = req.query;
   const schoolId = req.schoolId;
 
-  let paymentFilter = { schoolId, academicYear };
+  const feePayments = await FeePayment.find({ schoolId, academicYear }).lean();
+  const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
-  if (classId && classId !== "ALL") {
-    paymentFilter.class = new mongoose.Types.ObjectId(classId);
-  }
-
-  const feePayments = await FeePayment.find(paymentFilter).lean();
-
-  let totalExpected = 0;
-  let totalCollected = 0;
-  let paidCount = 0;
-  let unpaidCount = 0;
-
-  const monthPrefix =
-    month && month !== "ALL"
-      ? month.substring(0, 3).toUpperCase()
-      : null;
+  let totalExpected = 0, totalCollected = 0, paidCount = 0, unpaidCount = 0;
 
   feePayments.forEach(fp => {
+    let isPaid = false;
 
     if (monthPrefix) {
-      const target = fp.installments.find(inst =>
-        inst.name.toUpperCase().startsWith(monthPrefix)
-      );
-
-      if (!target) return;
-
-      totalExpected += target.amount;
-      totalCollected += target.paidAmount || 0;
-
-      if ((target.paidAmount || 0) >= target.amount)
-        paidCount++;
-      else
-        unpaidCount++;
-
+      const target = fp.installments.find(inst => inst.name.toUpperCase().startsWith(monthPrefix));
+      if (target) {
+        totalExpected += target.amount;
+        totalCollected += target.paidAmount;
+        isPaid = (target.status === "PAID" || target.paidAmount >= target.amount);
+        if (target.amount > 0) isPaid ? paidCount++ : unpaidCount++;
+      }
     } else {
-      // 🔥 YEARLY CORRECT LOGIC
-      const expected = fp.totalDue || 0;
-      const collected = fp.totalPaid || 0;
-
-      totalExpected += expected;
-      totalCollected += collected;
-
-      if (collected >= expected)
-        paidCount++;
-      else
-        unpaidCount++;
+      totalExpected += fp.totalDue;
+      totalCollected += fp.totalPaid;
+      isPaid = (fp.totalPaid >= fp.totalDue && fp.totalDue > 0);
+      isPaid ? paidCount++ : unpaidCount++;
     }
 
   });
@@ -563,11 +536,7 @@ export const getFeeStatistics = asyncHandler(async (req, res) => {
     totalStudents: feePayments.length,
     totalExpected,
     totalCollected,
-    totalPending: totalExpected - totalCollected,
-    collectionPercentage:
-      totalExpected > 0
-        ? Math.round((totalCollected / totalExpected) * 100)
-        : 0,
+    totalPending: Math.max(0, totalExpected - totalCollected),
     paymentStatus: { paid: paidCount, unpaid: unpaidCount }
   });
 });

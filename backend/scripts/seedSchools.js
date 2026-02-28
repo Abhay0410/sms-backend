@@ -1,6 +1,8 @@
 // scripts/seedSchools.js
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import School from '../models/School.js';
+import Admin from '../models/Admin.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -15,8 +17,9 @@ const seedSchools = async () => {
     await connectDB();
 
     await School.deleteMany({});
+    await Admin.deleteMany({}); // Clear existing admins
 
-    const schools = [
+    const schoolsData = [
       { 
         schoolName: 'Green Valley School', 
         schoolCode: 'SCH001', 
@@ -56,11 +59,53 @@ const seedSchools = async () => {
           country: 'India',
         },
       },
+      { 
+        schoolName: 'Bulk Import High', 
+        schoolCode: 'SCH004', 
+        adminEmail: 'admin@bulktest.com',
+        phone: '9988776655',
+        address: {
+          street: 'Tech Park Road',
+          city: 'Hyderabad',
+          state: 'Telangana',
+          pincode: '500081',
+          country: 'India',
+        },
+      },
     ];
 
-    await School.insertMany(schools);
+    const schools = await School.insertMany(schoolsData);
     console.log('✅ 3 Demo Schools Created!');
-    console.log('📋 School Codes:', schools.map(s => s.schoolCode));
+
+    // Create Admins for these schools
+    const hashedPassword = await bcrypt.hash('Admin@123', 10);
+    
+    const admins = schools.map(school => ({
+      schoolId: school._id,
+      name: `${school.schoolName} Principal`,
+      email: school.adminEmail,
+      password: hashedPassword,
+      adminID: `ADM${school.schoolCode.slice(-3)}`, // SCH001 -> ADM001
+      phone: school.phone,
+      gender: 'Male',
+      designation: 'Principal',
+      department: 'Administration',
+      isSuperAdmin: true,
+      role: 'admin',
+      isActive: true
+    }));
+
+    await Admin.insertMany(admins);
+    console.log('✅ School Admins Created!');
+
+    console.log('\n📋 LOGIN CREDENTIALS:');
+    console.table(admins.map(a => ({
+      School: schools.find(s => s._id === a.schoolId).schoolName,
+      Email: a.email,
+      AdminID: a.adminID,
+      Password: 'Admin@123'
+    })));
+
     process.exit(0);
   } catch (error) {
     console.error('❌ Error:', error);

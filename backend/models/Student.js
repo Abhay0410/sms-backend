@@ -10,7 +10,13 @@ const studentSchema = new mongoose.Schema({
     // index: true 
   },
   name: { type: String, required: true, trim: true },
-  email: { type: String, sparse: true, lowercase: true, trim: true },
+  email: { 
+    type: String, 
+    sparse: true, 
+    lowercase: true, 
+    trim: true,
+    set: v => (v === '' || v === null) ? undefined : v // 🔥 Converts empty string to undefined
+  },
   password: { type: String, required: true },
   studentID: { type: String, required: true },
   rollNumber: { type: Number },
@@ -103,7 +109,14 @@ const studentSchema = new mongoose.Schema({
 studentSchema.plugin(mongoosePaginate);
 studentSchema.index({ schoolId: 1 });
 studentSchema.index({ schoolId: 1, studentID: 1 }, { unique: true });
-studentSchema.index({ schoolId: 1, email: 1 }, { unique: true, sparse: true });
+studentSchema.index(
+  { schoolId: 1, email: 1 }, 
+  { 
+    unique: true, 
+    sparse: true, 
+    partialFilterExpression: { email: { $type: "string" } } 
+  }
+);
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 studentSchema.index({ schoolId: 1, academicYear: 1, status: 1 });
 

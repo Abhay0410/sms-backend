@@ -218,11 +218,8 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     console.log("✅ Found existing parent:", parent.parentID);
     isExistingParent = true;
     parentID = parent.parentID;
-    
-    // Check if parent name matches
-    if (parent.name.toLowerCase() !== parentName.toLowerCase().trim()) {
-      throw new ValidationError(`Email ${parentEmail} is already registered with name: ${parent.name}`);
-    }
+    // ⚠️ RELAXED CHECK: If email matches, we link to existing parent.
+    // We ignore name mismatches (e.g. "John Doe" vs "Mr. John Doe") to prevent duplicate errors.
   } else {
     // Generate unique parent ID - MULTI-TENANT
     const year = new Date().getFullYear().toString().slice(-2);
@@ -390,8 +387,11 @@ if (dateOfBirth) {
   } catch (error) {
     console.error("❌ Student creation failed:", error);
     if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      throw new ValidationError(`${field} already exists: ${error.keyValue[field]}`);
+      const field = Object.keys(error.keyPattern).find(k => k !== 'schoolId');
+      if (error.keyValue[field] === null) {
+         throw new ValidationError("A student without an email already exists. Please provide a unique email.");
+      }
+      throw new ValidationError(`${field} '${error.keyValue[field]}' already exists in this school.`);
     }
     throw error;
   }
@@ -525,7 +525,7 @@ if (req.file) {
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name,
     profilePicture,
-    email,
+    email: email || undefined, // ✅ Fix: Empty email becomes undefined
     password: hashedPassword,
     studentID,
     dateOfBirth,

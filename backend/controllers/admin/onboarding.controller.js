@@ -268,7 +268,7 @@ export const importStudents = asyncHandler(async (req, res) => {
               name: rawName,
               studentID,
               admissionNumber: csvAdmissionID,
-              email: email || `${studentID}@school.com`,
+              email: email || undefined, // ✅ Fix: Allow empty emails (don't force dummy)
               password: pass,
               class: targetClass._id,
               className: targetClass.className,

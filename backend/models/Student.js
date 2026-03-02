@@ -10,9 +10,9 @@ const studentSchema = new mongoose.Schema({
     // index: true 
   },
   name: { type: String, required: true, trim: true },
-  email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
+  email: { type: String, sparse: true, lowercase: true, trim: true },
   password: { type: String, required: true },
-  studentID: { type: String, required: true, unique: true },
+  studentID: { type: String, required: true },
   rollNumber: { type: Number },
   dateOfBirth: { type: Date },
   phone: { type: String }, 
@@ -102,7 +102,8 @@ const studentSchema = new mongoose.Schema({
 
 studentSchema.plugin(mongoosePaginate);
 studentSchema.index({ schoolId: 1 });
-studentSchema.index({ schoolId: 1, studentID: 1 });
+studentSchema.index({ schoolId: 1, studentID: 1 }, { unique: true });
+studentSchema.index({ schoolId: 1, email: 1 }, { unique: true, sparse: true });
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 studentSchema.index({ schoolId: 1, academicYear: 1, status: 1 });
 

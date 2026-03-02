@@ -9,9 +9,9 @@ const parentSchema = new mongoose.Schema({
     // index: true 
   },
   name: { type: String, required: true, trim: true },
-  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  email: { type: String, required: true, lowercase: true, trim: true },
   password: { type: String, required: true },
-  parentID: { type: String, required: true, unique: true },
+  parentID: { type: String, required: true },
   phone: { type: String },
   relation: { 
     type: String, 
@@ -43,8 +43,7 @@ const parentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 parentSchema.index({ schoolId: 1 });
-parentSchema.index({ schoolId: 1, email: 1 });
-// parentSchema.index({ parentID: 1 });
-// parentSchema.index({ email: 1 });
+parentSchema.index({ schoolId: 1, parentID: 1 }, { unique: true });
+parentSchema.index({ schoolId: 1, email: 1 }, { unique: true });
 
 export default mongoose.model('Parent', parentSchema);

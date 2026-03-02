@@ -9,19 +9,21 @@ import FeePayment from '../../models/FeePayment.js';
 import { generateInstallments } from '../../utils/fee.utils.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { successResponse } from '../../utils/response.js';
+import { ValidationError } from '../../utils/errors.js';
 
 // Helper function to handle Case-Insensitive Headers
 const getVal = (row, keyName) => {
+  if (!row || typeof row !== 'object') return "";
   const keys = Object.keys(row);
   const foundKey = keys.find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return foundKey ? row[foundKey].trim() : "";
+  return foundKey && row[foundKey] ? row[foundKey].trim() : "";
 };
 
 // ✅ NEW HELPER: Robust Class Finder
 async function findClassRobust(schoolId, className, academicYear) {
   if (!className) return null;
   
-  // 1. Exact string match
+  // 1. Exact string match (e.g., "Class 10")
   let cls = await Class.findOne({ schoolId, className, academicYear });
   if (cls) return cls;
 
@@ -50,6 +52,8 @@ export const importAcademics = asyncHandler(async (req, res) => {
   const filePath = req.file.path;
   const rows = [];
 
+  if (!academicYear) throw new ValidationError("Academic Year is required");
+
   fs.createReadStream(filePath)
     .pipe(csv())
     .on('data', (data) => rows.push(data))
@@ -60,14 +64,14 @@ export const importAcademics = asyncHandler(async (req, res) => {
           const className = getVal(row, 'ClassName');
           const sectionName = getVal(row, 'SectionName');
           const rawSubjects = getVal(row, 'Subjects');
-          const classNumeric = parseInt(getVal(row, 'ClassNumeric')) || 0;
+          const classNumeric = parseInt(getVal(row, 'ClassNumeric')) || parseInt(className.replace(/\D/g, '')) || 0;
 
           if (!className || !sectionName) continue;
 
-          const subjectsArray = rawSubjects.split(',').filter(s => s.trim()).map(s => ({
+          const subjectsArray = rawSubjects ? rawSubjects.split(',').filter(s => s.trim()).map(s => ({
             subjectName: s.trim(),
             schoolId
-          }));
+          })) : [];
 
           const existingClass = await Class.findOne({ schoolId, className, academicYear });
 
@@ -123,18 +127,22 @@ export const importTeachers = asyncHandler(async (req, res) => {
 
           if (!teacherID || !email || !name) {
             errorCount++;
+            errorDetails.push(`Row missing ID, Email or Name: ${JSON.stringify(row)}`);
             continue;
           }
 
-          // Check for existing
-          const existing = await Teacher.findOne({ $or: [{ teacherID }, { email }] });
+          // Check for existing (Scoped to School)
+          const existing = await Teacher.findOne({ 
+            schoolId, 
+            $or: [{ teacherID }, { email }] 
+          });
           if (existing) { 
             skippedCount++; 
+            // errorDetails.push(`${name}: Skipped (Duplicate ID or Email)`); // Optional: Uncomment to see why skipped
             continue; 
           }
 
           try {
-            // 🔥 Yahan main saari possible fields bhej raha hoon default values ke saath
             await Teacher.create({
               schoolId,
               name,
@@ -152,7 +160,6 @@ export const importTeachers = asyncHandler(async (req, res) => {
             successCount++;
           } catch (createErr) {
             errorCount++;
-            // 🚨 YE LINE TERMINAL MEIN DEKHO: Pata chalega asli error kya hai
             console.log(`❌ Error creating ${name}:`, createErr.message); 
             errorDetails.push(`${name}: ${createErr.message}`);
           }
@@ -184,6 +191,13 @@ export const importStudents = asyncHandler(async (req, res) => {
   const filePath = req.file.path;
   const rows = [];
 
+  if (!academicYear) throw new ValidationError("Academic Year is required");
+  
+  // ID Generation logic
+  const year = new Date().getFullYear().toString().slice(-2);
+  const lastStudent = await Student.findOne({ schoolId }).sort({ studentID: -1 });
+  let studentCounter = (lastStudent && lastStudent.studentID) ? parseInt(lastStudent.studentID.slice(-4)) + 1 : 1;
+
   fs.createReadStream(filePath)
     .pipe(csv())
     .on('data', (data) => rows.push(data))
@@ -194,90 +208,90 @@ export const importStudents = asyncHandler(async (req, res) => {
 
         for (const row of rows) {
           try {
-            const studentID = getVal(row, 'AdmissionID');
-            const className = getVal(row, 'ClassName');
-            const section = getVal(row, 'Section');
-            const parentPhone = getVal(row, 'ParentPhone');
-            const parentName = getVal(row, 'ParentName');
-            const rollNumber = getVal(row, 'RollNumber'); // ✅ Extract Roll Number
+            // 🧹 CLEANING LOGIC: Aapke CSV mein names break ho rahe hain, unhe clean karo
+            const rawName = getVal(row, 'Name').replace(/\r?\n|\r/g, " ").trim();
+            const rawParentName = getVal(row, 'ParentName').replace(/\r?\n|\r/g, " ").trim();
+            const csvAdmissionID = getVal(row, 'AdmissionID').trim();
+            const className = getVal(row, 'ClassName').trim();
+            const email = getVal(row, 'Email').trim().toLowerCase();
 
-            if (!studentID || !className || !parentName) {
-              results.errors.push(`Row missing ID, Class or Parent Name`);
-              continue;
-            }
+            if (!className || !rawName) continue;
 
-            // 1. Validate Target Class (ROBUST LOOKUP)
+            // 1. Robust Class Lookup
             const targetClass = await findClassRobust(schoolId, className, academicYear);
             if (!targetClass) {
-              results.errors.push(`${studentID}: Class '${className}' not found for year ${academicYear}`);
+              results.errors.push(`${rawName}: Class '${className}' not found`);
               continue;
             }
 
-            // 2. Global Duplicate Check
-            const existing = await Student.findOne({ studentID, schoolId });
-            if (existing) { results.skipped++; continue; }
+            // 2. Strict Duplicate Check (Only within THIS school)
+            const existing = await Student.findOne({ 
+              schoolId, 
+              $or: [
+                { admissionNumber: csvAdmissionID },
+                ...(email ? [{ email }] : [])
+              ]
+            });
 
-            // 3. Create Parent
-            let parent = await Parent.findOne({ phone: parentPhone, schoolId });
+            if (existing) { 
+              results.skipped++; 
+              continue; 
+            }
+
+            // 3. Parent Handling (Unique PAR ID)
+            const parentPhone = getVal(row, 'ParentPhone');
+            const providedParentID = getVal(row, 'ParentID');
+            
+            let parent = await Parent.findOne({ 
+              schoolId, 
+              $or: [{ phone: parentPhone }, { parentID: providedParentID }] 
+            });
+
             if (!parent) {
               parent = await Parent.create({
                 schoolId,
-                name: parentName,
+                name: rawParentName,
                 phone: parentPhone,
-                email: `p_${studentID}@school.com`,
+                email: getVal(row, 'ParentEmail') || `p_${csvAdmissionID}@school.com`,
                 password: pass,
-                parentID: `PAR${studentID}`, // ✅ Required Field
-                relation: 'Guardian',        // ✅ Required Field
+                parentID: providedParentID || `PAR${year}${results.success.toString().padStart(4, '0')}`,
+                relation: 'Guardian',
                 role: 'parent',
-                isActive: true
+                isActive: true,
               });
             }
 
             // 4. Create Student
+            const studentID = `STU${year}${studentCounter.toString().padStart(4, '0')}`;
             const newStudent = await Student.create({
               schoolId,
-              name: getVal(row, 'Name'),
+              name: rawName,
               studentID,
-              email: getVal(row, 'Email') || `${studentID}@school.com`,
+              admissionNumber: csvAdmissionID,
+              email: email || `${studentID}@school.com`,
               password: pass,
               class: targetClass._id,
-              className: targetClass.className, // ✅ Use normalized name from DB
-              section,
-              rollNumber: rollNumber ? parseInt(rollNumber) : undefined, // ✅ Save Roll Number
+              className: targetClass.className,
+              section: getVal(row, 'Section'),
+              rollNumber: parseInt(getVal(row, 'RollNumber')) || 0,
               academicYear,
-              parent: parent._id, // ✅ Fixed: parentId -> parent
-              gender: getVal(row, 'Gender'),
-              fatherName: parentName,
-              role: 'student',
-              isActive: true,
+              parent: parent._id,
+              gender: getVal(row, 'Gender') || 'Male',
+              fatherName: rawParentName,
               status: 'ENROLLED'
             });
 
-            // 5. Fee Initialization
-            if (targetClass.feeStructure?.length > 0) {
-              const installments = generateInstallments(targetClass.feeStructure, academicYear);
-              const totalDue = installments.reduce((sum, i) => sum + i.amount, 0);
-              await FeePayment.create({
-                schoolId, student: newStudent._id, studentName: newStudent.name,
-                studentID, className: targetClass.className, section, academicYear,
-                installments, totalDue, totalAmount: totalDue, balancePending: totalDue,
-                status: 'PENDING'
-              });
-            }
+            // Update Parent's children array
+            await Parent.findByIdAndUpdate(parent._id, { $addToSet: { children: newStudent._id } });
+            
+            studentCounter++;
             results.success++;
           } catch (rowErr) {
-            console.error(`Row Error (${getVal(row, 'AdmissionID')}):`, rowErr.message);
-            results.errors.push(`${getVal(row, 'AdmissionID')}: ${rowErr.message}`);
+            results.errors.push(`Error for ${getVal(row, 'Name')}: ${rowErr.message}`);
           }
         }
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        
-        const msg = `Imported: ${results.success}, Skipped: ${results.skipped}, Errors: ${results.errors.length}`;
-        return res.status(200).json({
-          success: true,
-          message: msg,
-          data: results
-        });
+        return successResponse(res, `Process Complete. Imported: ${results.success}, Skipped: ${results.skipped}`, results);
       } catch (err) {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         res.status(500).json({ success: false, message: err.message });

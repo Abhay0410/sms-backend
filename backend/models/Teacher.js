@@ -7,9 +7,9 @@ const teacherSchema = new mongoose.Schema({
     required: true,
   },
   name: { type: String, required: true, trim: true },
-  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  email: { type: String, required: true, lowercase: true, trim: true },
   password: { type: String, required: true },
-  teacherID: { type: String, required: true, unique: true },
+  teacherID: { type: String, required: true },
 
   department: { type: String },
 
@@ -102,7 +102,7 @@ const teacherSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 teacherSchema.index({ schoolId: 1 });
-teacherSchema.index({ schoolId: 1, email: 1 });
-teacherSchema.index({ schoolId: 1, teacherID: 1 });
+teacherSchema.index({ schoolId: 1, email: 1 }, { unique: true });
+teacherSchema.index({ schoolId: 1, teacherID: 1 }, { unique: true });
 
 export default mongoose.model('Teacher', teacherSchema);

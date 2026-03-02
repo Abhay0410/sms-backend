@@ -14,14 +14,14 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  const { academicYear, search, status, month } = req.query;
+  const { academicYear, search, status, month, classId } = req.query;
   const schoolId = req.schoolId;
 
   let filter = { schoolId, academicYear, role: 'student' };
 
   if (classId && classId !== "ALL") {
-  filter.class = new mongoose.Types.ObjectId(classId);
-}
+    filter.class = new mongoose.Types.ObjectId(classId);
+  }
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -44,15 +44,14 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     if (monthPrefix) {
       const target = fp.installments.find(i => i.name.toUpperCase().startsWith(monthPrefix));
       if (target) {
-        dPaid = target.paidAmount; 
+        dPaid = target.paidAmount || 0; 
         dTotal = target.amount; 
         dStatus = target.status;
         isPaidInContext = (dStatus === "PAID" || dPaid >= dTotal);
       } else {
-        continue; // Student has no fee for this month, skip
+        continue; 
       }
     } else {
-      // 📊 YEARLY: Check if total balance is 0
       isPaidInContext = (fp.totalPaid >= fp.totalDue && fp.totalDue > 0);
     }
 
@@ -63,6 +62,7 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     studentsWithFees.push({
       ...student,
       feeDetails: {
+        feePaymentId: fp._id,
         totalFee: dTotal,
         paidAmount: dPaid,
         pendingAmount: Math.max(0, dTotal - dPaid),
@@ -447,67 +447,16 @@ export const recordPayment = asyncHandler(async (req, res) => {
 });
 });
 
-// ==========================================
-// 5. FEE REPORTS & STATISTICS
-// ==========================================
-// export const getFeeStatistics = asyncHandler(async (req, res) => {
-//   const { academicYear, month  ,classId} = req.query; // month e.g., "JANUARY"
-//   const schoolId = req.schoolId;
-
-//   let paymentFilter = { schoolId, academicYear };
-
-// if (classId && classId !== "ALL") {
-//   paymentFilter.class = new mongoose.Types.ObjectId(classId);
-// }
-
-// const feePayments = await FeePayment.find(paymentFilter).lean();
-
-//   let totalExpected = 0;
-//   let totalCollected = 0;
-//   let paidCount = 0;
-//   let unpaidCount = 0;
-
-//   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
-
-//   feePayments.forEach(fp => {
-//     if (monthPrefix) {
-//       // 🎯 MONTHLY LOGIC: Match specific month (e.g., "JAN - tution fee")
-//       const target = fp.installments.find(inst => 
-//         inst.name.toUpperCase().startsWith(monthPrefix)
-//       );
-
-//       if (target) {
-//         totalExpected += target.amount;
-//         totalCollected += target.paidAmount ||0 ;
-//        if ((target.paidAmount || 0) >= target.amount)
-//           paidCount++;
-//         else
-//           unpaidCount++;
-//       }
-//     } else {
-//       // 📊 YEARLY LOGIC
-//       totalExpected += fp.totalDue;
-//       totalCollected += fp.totalPaid;
-//       const isActuallyPaid = (fp.totalDue - fp.totalPaid) <= 0;
-//       if (isActuallyPaid) paidCount++; else unpaidCount++;
-//     }
-//   });
-
-//   return successResponse(res, 'Stats calculated', {
-//     totalStudents: feePayments.length,
-//     totalExpected,
-//     totalCollected,
-//     totalPending: totalExpected - totalCollected,
-//     collectionPercentage: totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0,
-//     paymentStatus: { paid: paidCount, unpaid: unpaidCount }
-//   });
-// });
-
 export const getFeeStatistics = asyncHandler(async (req, res) => {
   const { academicYear, month, classId } = req.query;
   const schoolId = req.schoolId;
 
-  const feePayments = await FeePayment.find({ schoolId, academicYear }).lean();
+  let statsFilter = { schoolId, academicYear };
+  if (classId && classId !== "ALL") {
+    statsFilter.class = new mongoose.Types.ObjectId(classId);
+  }
+
+  const feePayments = await FeePayment.find(statsFilter).lean();
   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
   let totalExpected = 0, totalCollected = 0, paidCount = 0, unpaidCount = 0;
@@ -1048,18 +997,24 @@ function getCurrentAcademicYear() {
 }
 
 export const getAllPayments = asyncHandler(async (req, res) => {
-  const { academicYear, status, className } = req.query;
+  const { academicYear, status, className, page = 1, limit = 7 } = req.query;
   const schoolId = req.schoolId;
 
+  const skip = (parseInt(page) - 1) * parseInt(limit);
   const filter = { schoolId };
 
   if (academicYear) filter.academicYear = academicYear;
   if (status) filter.status = status;
   if (className) filter.className = className;
 
-  // Use regular find instead of paginate
+  // ✅ 1. Count total for frontend
+  const total = await FeePayment.countDocuments(filter);
+
+  // ✅ 2. Fetch only limited records
   const feePayments = await FeePayment.find(filter)
     .sort({ 'payments.paymentDate': -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
     .lean();
 
   const formattedPayments = [];
@@ -1086,8 +1041,14 @@ export const getAllPayments = asyncHandler(async (req, res) => {
     });
   });
 
-  return successResponse(res, 'All payments fetched', { 
-    payments: formattedPayments
+  return res.status(200).json({
+    success: true,
+    data: { 
+      payments: formattedPayments,
+      total,
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit)
+    }
   });
 });
 

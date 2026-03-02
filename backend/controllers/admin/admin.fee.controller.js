@@ -18,6 +18,10 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
   const schoolId = req.schoolId;
 
   let filter = { schoolId, academicYear, role: 'student' };
+
+  if (classId && classId !== "ALL") {
+  filter.class = new mongoose.Types.ObjectId(classId);
+}
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -161,17 +165,18 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
       updateOne: {
         filter: { student: student._id, academicYear, schoolId },
         update: {
-          $set: {
-            installments: studentInstallments,
-            totalDue: grandTotal,
-            totalAmount: grandTotal,
-            balancePending: grandTotal, // Initial balance
-            status: 'PENDING',
-            studentName: student.name,
-            studentID: student.studentID,
-            className: className,
-            section: student.section
-          }
+         $set: {
+  class: student.class,   // 🔥 ADD THIS
+  installments: studentInstallments,
+  totalDue: grandTotal,
+  totalPaid: 0,
+  balancePending: grandTotal,
+  status: 'PENDING',
+  studentName: student.name,
+  studentID: student.studentID,
+  className: className,
+  section: student.section
+}
         },
         upsert: true
       }
@@ -445,8 +450,61 @@ export const recordPayment = asyncHandler(async (req, res) => {
 // ==========================================
 // 5. FEE REPORTS & STATISTICS
 // ==========================================
+// export const getFeeStatistics = asyncHandler(async (req, res) => {
+//   const { academicYear, month  ,classId} = req.query; // month e.g., "JANUARY"
+//   const schoolId = req.schoolId;
+
+//   let paymentFilter = { schoolId, academicYear };
+
+// if (classId && classId !== "ALL") {
+//   paymentFilter.class = new mongoose.Types.ObjectId(classId);
+// }
+
+// const feePayments = await FeePayment.find(paymentFilter).lean();
+
+//   let totalExpected = 0;
+//   let totalCollected = 0;
+//   let paidCount = 0;
+//   let unpaidCount = 0;
+
+//   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
+
+//   feePayments.forEach(fp => {
+//     if (monthPrefix) {
+//       // 🎯 MONTHLY LOGIC: Match specific month (e.g., "JAN - tution fee")
+//       const target = fp.installments.find(inst => 
+//         inst.name.toUpperCase().startsWith(monthPrefix)
+//       );
+
+//       if (target) {
+//         totalExpected += target.amount;
+//         totalCollected += target.paidAmount ||0 ;
+//        if ((target.paidAmount || 0) >= target.amount)
+//           paidCount++;
+//         else
+//           unpaidCount++;
+//       }
+//     } else {
+//       // 📊 YEARLY LOGIC
+//       totalExpected += fp.totalDue;
+//       totalCollected += fp.totalPaid;
+//       const isActuallyPaid = (fp.totalDue - fp.totalPaid) <= 0;
+//       if (isActuallyPaid) paidCount++; else unpaidCount++;
+//     }
+//   });
+
+//   return successResponse(res, 'Stats calculated', {
+//     totalStudents: feePayments.length,
+//     totalExpected,
+//     totalCollected,
+//     totalPending: totalExpected - totalCollected,
+//     collectionPercentage: totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0,
+//     paymentStatus: { paid: paidCount, unpaid: unpaidCount }
+//   });
+// });
+
 export const getFeeStatistics = asyncHandler(async (req, res) => {
-  const { academicYear, month } = req.query; // month e.g., "JANUARY"
+  const { academicYear, month, classId } = req.query;
   const schoolId = req.schoolId;
 
   const feePayments = await FeePayment.find({ schoolId, academicYear }).lean();
@@ -471,9 +529,10 @@ export const getFeeStatistics = asyncHandler(async (req, res) => {
       isPaid = (fp.totalPaid >= fp.totalDue && fp.totalDue > 0);
       isPaid ? paidCount++ : unpaidCount++;
     }
+
   });
 
-  return successResponse(res, 'Stats calculated', {
+  return successResponse(res, "Stats calculated", {
     totalStudents: feePayments.length,
     totalExpected,
     totalCollected,

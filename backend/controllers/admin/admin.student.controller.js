@@ -146,6 +146,10 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     transportRequired, busRoute, pickupPoint,
     hostelResident, hostelBlock, roomNumber
   } = req.body;
+
+    // dateOfBirth: new Date(req.body.dateOfBirth),
+  
+
   
   console.log("📝 Received student registration data:", {
     studentName,
@@ -305,6 +309,17 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   
   const studentHashedPassword = await bcrypt.hash(studentPassword, 10);
   const parentHashedPassword = await bcrypt.hash(parentPassword, 10);
+
+  // ✅ Fix date parsing
+let formattedDOB;
+
+if (dateOfBirth) {
+  const parsedDate = new Date(dateOfBirth);
+
+  if (!isNaN(parsedDate.getTime())) {
+    formattedDOB = parsedDate;
+  }
+}
   
   // ✅ CREATE STUDENT WITH PROPER CLASS ASSIGNMENT - MULTI-TENANT
   const student = new Student({
@@ -313,7 +328,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     email: studentEmail || undefined,
     password: studentHashedPassword,
     studentID,
-    dateOfBirth,
+    dateOfBirth: formattedDOB,
     gender,
     bloodGroup,
     religion,
@@ -469,6 +484,8 @@ export const createStudent = asyncHandler(async (req, res) => {
     motherName, motherPhone, motherEmail,
     address, className, section, academicYear, rollNumber, admissionDate
   } = req.body;
+
+  
   
 
   // ✅ Handle profile picture

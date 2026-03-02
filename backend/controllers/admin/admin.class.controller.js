@@ -52,6 +52,9 @@ export const createClass = asyncHandler(async (req, res) => {
   if (!classData.className || !classData.academicYear) {
     throw new ValidationError('Class name and academic year are required');
   }
+ const schoolId = req.user.schoolId;  // ✅ Always use user.schoolId
+
+  console.log("Logged user schoolId:", schoolId);
   
   // ✅ Check duplicate within same school
   const existingClass = await Class.findOne({
@@ -59,6 +62,8 @@ export const createClass = asyncHandler(async (req, res) => {
     className: classData.className,
     academicYear: classData.academicYear
   });
+
+ 
   
   if (existingClass) {
     throw new ValidationError(`Class ${classData.className} already exists for academic year ${classData.academicYear}`);

@@ -14,14 +14,20 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
+  // ✅ 1. Destructure classId properly
   const { academicYear, search, status, month, classId } = req.query;
   const schoolId = req.schoolId;
 
+  const statusFilter = status ? status.toUpperCase() : null;
+
+  // ✅ 2. Build filter safely
   let filter = { schoolId, academicYear, role: 'student' };
 
-  if (classId && classId !== "ALL") {
+  // Agar classId valid MongoDB ID hai tabhi use karein
+  if (classId && classId !== "ALL" && mongoose.Types.ObjectId.isValid(classId)) {
     filter.class = new mongoose.Types.ObjectId(classId);
   }
+
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -29,17 +35,42 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     ];
   }
 
-  // ✅ Saare students le aao taaki count mismatch na ho (ya limit badha do)
+  // ✅ 3. Fetch Students first
   const students = await Student.find(filter).lean();
   const studentsWithFees = [];
   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
   for (const student of students) {
-    const fp = await FeePayment.findOne({ student: student._id, academicYear, schoolId }).lean();
-    if (!fp) continue;
+    // 🔍 Find Fee Record
+    const fp = await FeePayment.findOne({ 
+      student: student._id, 
+      academicYear, 
+      schoolId 
+    }).lean();
+
+    // 🚩 IMPORTANT: Agar student register hai par fee set nahi hai, fir bhi list mein dikhao
+    if (!fp) {
+       // If filtering by status, skip students with no fee record
+       if (statusFilter === 'PAID' || statusFilter === 'UNPAID' || statusFilter === 'PENDING') {
+         continue;
+       }
+       studentsWithFees.push({
+         ...student,
+         feeDetails: {
+           status: "NOT_SET",
+           totalFee: 0,
+           paidAmount: 0,
+           pendingAmount: 0,
+           installments: []
+         }
+       });
+       continue;
+    }
 
     let isPaidInContext = false;
-    let dPaid = fp.totalPaid, dTotal = fp.totalDue, dStatus = fp.status;
+    let dPaid = fp.totalPaid || 0;
+    let dTotal = fp.totalDue || 0;
+    let dStatus = fp.status;
 
     if (monthPrefix) {
       const target = fp.installments.find(i => i.name.toUpperCase().startsWith(monthPrefix));
@@ -49,15 +80,15 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
         dStatus = target.status;
         isPaidInContext = (dStatus === "PAID" || dPaid >= dTotal);
       } else {
-        continue; 
+        continue; // Is mahine ki fee nahi hai
       }
     } else {
       isPaidInContext = (fp.totalPaid >= fp.totalDue && fp.totalDue > 0);
     }
 
-    // ✅ STRICT SYNC WITH STATS
-    if (status === "paid" && !isPaidInContext) continue;
-    if (status === "unpaid" && isPaidInContext) continue;
+    // Status Filter Check (From UI)
+    if (statusFilter === "PAID" && !isPaidInContext) continue;
+    if ((statusFilter === "PENDING" || statusFilter === "UNPAID") && isPaidInContext) continue;
 
     studentsWithFees.push({
       ...student,

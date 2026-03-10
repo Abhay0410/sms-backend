@@ -154,7 +154,13 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
   for (const employeeId of employeeIds) {
     try {
       const structure = await Payroll.findOne({ employeeId, schoolId, isTemplate: true });
-      if (!structure) throw new Error("Salary structure not set");
+      if (!structure) {
+        results.failed.push({ 
+          employeeId, 
+          reason: "Salary structure not set. Please configure salary first." 
+        });
+        continue;
+      }
 
       // Attendance fetching
       const attendanceRecords = await StaffAttendance.find({
@@ -249,7 +255,20 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
       results.failed.push({ employeeId, reason: err.message });
     }
   }
-  return successResponse(res, "Payroll run completed", results);
+  
+  if (results.success.length === 0 && results.failed.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Payroll generation failed for all selected staff.",
+      details: results.failed
+    });
+  }
+
+  const msg = results.failed.length > 0 
+    ? `Generated ${results.success.length} slips, but ${results.failed.length} failed.`
+    : "Payroll run completed successfully";
+
+  return successResponse(res, msg, results);
 });
 
 // ✅ GET: Unified staff list for payroll selection

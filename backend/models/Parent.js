@@ -15,7 +15,7 @@ const parentSchema = new mongoose.Schema({
   phone: { type: String },
   relation: { 
     type: String, 
-    enum: ['Father', 'Mother', 'Guardian'],
+    enum: ['Father', 'Mother', 'Grandparent', 'Uncle', 'Aunt', 'Guardian', 'Other'],
     required: true 
   },
   occupation: { type: String },

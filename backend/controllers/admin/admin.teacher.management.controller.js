@@ -1,6 +1,7 @@
 // controllers/admin/admin.teacherManagement.controller.js - MULTI-TENANT VERSION
 import Teacher from '../../models/Teacher.js';
 import Class from '../../models/Class.js';
+import Timetable from '../../models/Timetable.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
@@ -391,6 +392,54 @@ export const getAvailableSubjectsForSection = asyncHandler(async (req, res) => {
   });
 });
 
+export const getTeacherScheduleForAdmin = asyncHandler(async (req, res) => {
+  const { teacherId } = req.query;
+  const { academicYear = "2025-2026" } = req.query;
+
+  if (!teacherId) throw new ValidationError("Teacher ID is required");
+
+  const teacher = await Teacher.findOne({ _id: teacherId, schoolId: req.schoolId });
+  if (!teacher) throw new NotFoundError("Teacher");
+
+  const teacherClassIds = teacher.assignedClasses?.map(ac => ac.class) || [];
+
+  // ✅ Timetable find logic
+  const timetables = await Timetable.find({
+    schoolId: req.schoolId,
+    class: { $in: teacherClassIds },
+    academicYear,
+    status: "published",
+    isActive: true
+  }).populate('class', 'className');
+
+  const schedule = {
+    Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [], Saturday: []
+  };
+
+  timetables.forEach((tt) => {
+    if (tt.schedule) {
+      tt.schedule.forEach((dayEntry) => {
+        dayEntry.periods.forEach((period) => {
+          // Check if this teacher is assigned to this specific period
+          if (period.teacher && period.teacher.toString() === teacherId) {
+            schedule[dayEntry.day].push({
+              className: tt.class?.className || "N/A",
+              section: tt.section,
+              periodNumber: period.periodNumber,
+              subject: period.subject,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              room: period.room || "N/A"
+            });
+          }
+        });
+      });
+    }
+  });
+
+  return successResponse(res, "Schedule retrieved", { schedule });
+});
+
 export default {
   getTeachersWithAssignments,
   assignTeacherToSection,
@@ -402,4 +451,5 @@ export default {
   removeClassTeacher,
   getSectionTeachers,
   getAvailableSubjectsForSection,
+  getTeacherScheduleForAdmin,
 };

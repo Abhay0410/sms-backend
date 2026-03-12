@@ -11,7 +11,8 @@ import {
   removeTeacherFromSection,
   getTeacherAssignments,
   getSectionTeachers,
-  getAvailableSubjectsForSection
+  getAvailableSubjectsForSection,
+  getTeacherScheduleForAdmin,
 } from "../../controllers/admin/admin.teacher.management.controller.js";
 
 const router = Router();
@@ -26,7 +27,7 @@ router.get("/list", getTeachersWithAssignments);
 router.get("/teachers", getTeachersWithAssignments); // Alias
 router.get("/:teacherId/assignments", getTeacherAssignments);
 router.get("/section-teachers", getSectionTeachers);
-
+router.get('/teacher-schedule', getTeacherScheduleForAdmin);
 // Assign teachers
 router.post("/assign", assignTeacherToSection);
 router.put("/assign-class-teacher", assignClassTeacher);

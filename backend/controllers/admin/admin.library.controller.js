@@ -207,7 +207,25 @@ export const getLibraryStats = asyncHandler(async (req, res) => {
 
   return successResponse(res, "Stats fetched", { totalIssued, totalReturned, overdue });
 });
+// Recent Transactions for Live Feed
+export const getRecentTransactions = asyncHandler(async (req, res) => {
+  const schoolId = req.schoolId;
+  const transactions = await LibraryIssue.find({ schoolId })
+    .sort({ updatedAt: -1 })
+    .limit(10) // Increased limit for better feed
+    .populate('bookId', 'title serialCode');
+    
+  const formatted = transactions.map(t => ({
+    // Determine type based on status for the Live Feed
+    type: t.status === 'ISSUED' ? 'ISSUE' : 'RETURN', 
+    bookTitle: t.bookId?.title || 'Unknown Book',
+    bookCode: t.bookId?.serialCode || 'N/A',
+    studentName: t.userName || 'Unknown User',
+    timestamp: t.updatedAt
+  }));
 
+  return successResponse(res, "Recent transactions", formatted);
+});
 
 //  Controller Function: Get only active issues
 export const getActiveIssues = asyncHandler(async (req, res) => {

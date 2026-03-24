@@ -75,15 +75,16 @@ export const deleteBook = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const schoolId = req.schoolId;
 
+  // Check if book exists and belongs to school
   const book = await LibraryBook.findOne({ _id: id, schoolId });
   if (!book) throw new NotFoundError("Book");
   
   if (book.status === 'ISSUED') {
-    throw new ValidationError("Cannot delete a book that is currently issued to someone.");
+    throw new ValidationError("Cannot delete a book that is currently issued. Please return it first.");
   }
 
   await LibraryBook.deleteOne({ _id: id });
-  return successResponse(res, "Book removed from inventory");
+  return successResponse(res, "Book removed from inventory successfully");
 });
 
 // ✅ POST: Issue a Book
@@ -206,22 +207,48 @@ export const getLibraryStats = asyncHandler(async (req, res) => {
 
   return successResponse(res, "Stats fetched", { totalIssued, totalReturned, overdue });
 });
-
-// ✅ 7. Get Recent Transactions
+// Recent Transactions for Live Feed
 export const getRecentTransactions = asyncHandler(async (req, res) => {
   const schoolId = req.schoolId;
   const transactions = await LibraryIssue.find({ schoolId })
     .sort({ updatedAt: -1 })
-    .limit(5)
+    .limit(10) // Increased limit for better feed
     .populate('bookId', 'title serialCode');
     
   const formatted = transactions.map(t => ({
-    type: t.status === 'ISSUED' ? 'ISSUE' : 'RETURN',
-    bookTitle: t.bookId?.title || 'Unknown',
+    // Determine type based on status for the Live Feed
+    type: t.status === 'ISSUED' ? 'ISSUE' : 'RETURN', 
+    bookTitle: t.bookId?.title || 'Unknown Book',
     bookCode: t.bookId?.serialCode || 'N/A',
-    studentName: t.userName,
+    studentName: t.userName || 'Unknown User',
     timestamp: t.updatedAt
   }));
 
   return successResponse(res, "Recent transactions", formatted);
+});
+
+//  Controller Function: Get only active issues
+export const getActiveIssues = asyncHandler(async (req, res) => {
+  const schoolId = req.schoolId;
+  
+  // Find only 'ISSUED' records and populate book details
+  const activeIssues = await LibraryIssue.find({ 
+    schoolId, 
+    status: 'ISSUED' 
+  })
+  .populate('bookId', 'title serialCode author')
+  .sort({ dueDate: 1 });
+
+  // Format specifically for your modal
+  const formatted = activeIssues.map(i => ({
+    bookTitle: i.bookId?.title || "Unknown Book",
+    bookCode: i.bookId?.serialCode || "N/A",
+    userName: i.userName,
+    userType: i.userType,
+    userId: i.userId,
+    dueDate: i.dueDate, // Use actual dueDate from DB
+    issueDate: i.issueDate
+  }));
+
+  return successResponse(res, "Active issues fetched", formatted);
 });

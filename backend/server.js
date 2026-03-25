@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import compression from "compression";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import Session from "./models/Session.js";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -51,6 +52,7 @@ import teacherHRRoutes from "./routes/teacher/teacher.hr.routes.js";
 import teacherPayrollRoutes from "./routes/admin/admin.payroll.routes.js";
 import adminLibraryRoutes from "./routes/admin/admin.library.routes.js";
 import adminOnboardingRoutes from "./routes/admin/onboarding.routes.js";
+import sessionRoutes from "./routes/session/session.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,6 +136,45 @@ app.use("/assets", express.static(path.join(__dirname, "assets")));
 // DATABASE & ROUTES
 // ========================================
 
+const autoCreateSession = async () => {
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+
+    const startYear = month >= 3 ? year : year - 1; // April logic
+    const endYear = startYear + 1;
+
+    const exists = await Session.findOne({ startYear, endYear });
+
+    if (!exists) {
+  await Session.updateMany({ isActive: true }, { isActive: false });
+
+  await Session.create({
+    startYear,
+    endYear,
+    isActive: true,
+  });
+
+  console.log(`✅ Auto session created: ${startYear}-${endYear}`);
+} else {
+  // 👉 ensure active
+  if (!exists.isActive) {
+    await Session.updateMany({}, { isActive: false });
+
+    exists.isActive = true;
+    await exists.save();
+
+    console.log(`✅ Session activated: ${startYear}-${endYear}`);
+  } else {
+    console.log("ℹ️ Session already active");
+  }
+}
+  } catch (error) {
+    console.error("❌ Auto session error:", error.message);
+  }
+};
+
 async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
@@ -145,12 +186,16 @@ async function connectDB() {
     else process.exit(1);
   }
 }
-connectDB();
+// connectDB();
+connectDB().then(() => {
+  autoCreateSession();
+});
 
 app.get("/health", (req, res) => res.json({ status: "up", env: process.env.NODE_ENV }));
 
 // Route Registration
 app.use('/api/schools', schoolRoutes);
+app.use("/api/session", sessionRoutes);
 app.use("/api/auth/admin", adminAuthRoutes);
 app.use("/api/auth/teacher", teacherAuthRoutes);
 app.use("/api/auth/student", studentAuthRoutes);

@@ -1,4 +1,5 @@
 // controllers/admin/admin.teacherManagement.controller.js - MULTI-TENANT VERSION
+import mongoose from 'mongoose';
 import Teacher from '../../models/Teacher.js';
 import Class from '../../models/Class.js';
 import Timetable from '../../models/Timetable.js';
@@ -8,7 +9,11 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 
 // Get all teachers with their assignments - MULTI-TENANT
 export const getTeachersWithAssignments = asyncHandler(async (req, res) => {
-  const { status, hasAssignments } = req.query;
+  const { status, hasAssignments, academicYear } = req.query;
+
+  if (!academicYear) {
+    throw new ValidationError('Academic Year is required to fetch assignments.');
+  }
   
   const filter = { schoolId: req.schoolId }; // ✅ MULTI-TENANT
   
@@ -17,14 +22,21 @@ export const getTeachersWithAssignments = asyncHandler(async (req, res) => {
   const teachers = await Teacher.find(filter)
     .select('-password')
     .populate('assignedClasses.class', 'className sections')
-    .sort({ name: 1 });
+    .sort({ name: 1 })
+    .lean(); // Use lean for performance
+  
+  // Manually filter assignments for the selected academic year
+  const processedTeachers = teachers.map(teacher => {
+    const assignmentsForYear = teacher.assignedClasses.filter(ac => ac.academicYear === academicYear);
+    return { ...teacher, assignedClasses: assignmentsForYear };
+  });
   
   // Filter by assignment status if requested
-  let filteredTeachers = teachers;
+  let filteredTeachers = processedTeachers;
   if (hasAssignments === 'true') {
-    filteredTeachers = teachers.filter(t => t.assignedClasses && t.assignedClasses.length > 0);
+    filteredTeachers = processedTeachers.filter(t => t.assignedClasses && t.assignedClasses.length > 0);
   } else if (hasAssignments === 'false') {
-    filteredTeachers = teachers.filter(t => !t.assignedClasses || t.assignedClasses.length === 0);
+    filteredTeachers = processedTeachers.filter(t => !t.assignedClasses || t.assignedClasses.length === 0);
   }
   
   return successResponse(res, 'Teachers with assignments retrieved successfully', {
@@ -35,18 +47,10 @@ export const getTeachersWithAssignments = asyncHandler(async (req, res) => {
 
 // Assign teacher to section and subject - MULTI-TENANT
 export const assignTeacherToSection = asyncHandler(async (req, res) => {
-  const { teacherId, classId, sectionName, subjectName, isClassTeacher } = req.body;
+  const { teacherId, classId, sectionName, subjectName, isClassTeacher, academicYear, hoursPerWeek } = req.body;
   
   if (!teacherId || !classId || !sectionName || !subjectName) {
     throw new ValidationError('Teacher, class, section, and subject are required');
-  }
-  
-  const teacher = await Teacher.findOne({
-    _id: teacherId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
-  });
-  if (!teacher) {
-    throw new NotFoundError('Teacher');
   }
   
   const classData = await Class.findOne({
@@ -87,28 +91,26 @@ export const assignTeacherToSection = asyncHandler(async (req, res) => {
   
   await classData.save();
   
-  // Update teacher's assigned classes
-  const existingAssignment = teacher.assignedClasses.find(
-    ac => ac.class.toString() === classId && 
-          ac.section === sectionName && 
-          ac.subject === subjectName
+  // Atomically update teacher's assigned classes to avoid validation on old data
+  const newAssignment = {
+    class: classId,
+    section: sectionName,
+    subject: subjectName,
+    academicYear: academicYear,
+    isClassTeacher: isClassTeacher || false,
+    hoursPerWeek: hoursPerWeek || 0
+  };
+
+  // Use $addToSet to prevent creating duplicate assignments
+  await Teacher.updateOne(
+    { _id: teacherId, schoolId: req.schoolId },
+    { $addToSet: { assignedClasses: newAssignment } }
   );
-  
-  if (!existingAssignment) {
-    teacher.assignedClasses.push({
-      class: classId,
-      section: sectionName,
-      subject: subjectName,
-      isClassTeacher: isClassTeacher || false
-    });
-    await teacher.save();
-  }
   
   return successResponse(res, 'Teacher assigned successfully', {
     class: classData.className,
     section: sectionName,
     subject: subjectName,
-    teacher: teacher.name,
     isClassTeacher: isClassTeacher || false
   });
 });
@@ -160,14 +162,21 @@ export const removeTeacherFromSection = asyncHandler(async (req, res) => {
   
   await classData.save();
   
-  // Remove from teacher's assigned classes
-  teacher.assignedClasses = teacher.assignedClasses.filter(
-    ac => !(ac.class.toString() === classId && 
-            ac.section === sectionName && 
-            ac.subject === subjectName)
+  const academicYear = classData.academicYear;
+
+  await Teacher.updateOne(
+    { _id: teacherId, schoolId: req.schoolId },
+    {
+      $pull: {
+        assignedClasses: {
+          class: new mongoose.Types.ObjectId(classId),
+          section: sectionName,
+          subject: subjectName,
+          academicYear: academicYear,
+        },
+      },
+    }
   );
-  
-  await teacher.save();
   
   return successResponse(res, 'Teacher removed successfully from subject');
 });
@@ -199,15 +208,16 @@ export const getTeacherAssignments = asyncHandler(async (req, res) => {
 
 // Assign class teacher - MULTI-TENANT
 export const assignClassTeacher = asyncHandler(async (req, res) => {
-  const { teacherId, classId, sectionName } = req.body;
+  const { teacherId, classId, sectionName, academicYear } = req.body;
+  const schoolId = req.schoolId;
   
-  if (!teacherId || !classId || !sectionName) {
-    throw new ValidationError('Teacher, class, and section are required');
+  if (!teacherId || !classId || !sectionName || !academicYear) {
+    throw new ValidationError('Teacher, class, section, and academic year are required');
   }
   
   const teacher = await Teacher.findOne({
     _id: teacherId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
+    schoolId
   });
   if (!teacher) {
     throw new NotFoundError('Teacher');
@@ -215,7 +225,7 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
   
   const classData = await Class.findOne({
     _id: classId,
-    schoolId: req.schoolId  // ✅ MULTI-TENANT
+    schoolId
   });
   if (!classData) {
     throw new NotFoundError('Class');
@@ -230,7 +240,7 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
   if (section.classTeacher && section.classTeacher.toString() !== teacherId) {
     const existingTeacher = await Teacher.findOne({
       _id: section.classTeacher,
-      schoolId: req.schoolId
+      schoolId
     });
     throw new ValidationError(
       `Section already has a class teacher (${existingTeacher ? existingTeacher.name : 'Unknown'}). Remove existing one first.`
@@ -240,12 +250,27 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
   section.classTeacher = teacherId;
   await classData.save();
   
-  // Update teacher's assignments to mark as class teacher
-  teacher.assignedClasses.forEach(ac => {
-    if (ac.class.toString() === classId && ac.section === sectionName) {
-      ac.isClassTeacher = true;
-    }
-  });
+  // 4. Update Teacher Model - The "Smart" Way
+  // Check if teacher already teaches ANY subject in this section
+  const existingAssignmentIndex = teacher.assignedClasses.findIndex(ac => 
+    ac.class.toString() === classId && 
+    ac.section === sectionName && 
+    ac.academicYear === academicYear
+  );
+
+  if (existingAssignmentIndex > -1) {
+    // Teacher already assigned to a subject here, just flip the bit
+    teacher.assignedClasses[existingAssignmentIndex].isClassTeacher = true;
+  } else {
+    // Teacher is ONLY a class teacher (doesn't teach a subject yet)
+    teacher.assignedClasses.push({
+      class: classId,
+      section: sectionName,
+      subject: "Administrative", // Use a standard category instead of 'Class Teacher'
+      academicYear,
+      isClassTeacher: true
+    });
+  }
   
   await teacher.save();
   
@@ -291,20 +316,23 @@ export const removeClassTeacher = asyncHandler(async (req, res) => {
   section.classTeacher = null;
   await classData.save();
   
-  // Update teacher's assignments
+  // Atomically update teacher's assignments to avoid validation on old data
   if (removedTeacherId) {
-    const teacher = await Teacher.findOne({
-      _id: removedTeacherId,
-      schoolId: req.schoolId  // ✅ MULTI-TENANT
-    });
-    if (teacher) {
-      teacher.assignedClasses.forEach(ac => {
-        if (ac.class.toString() === classId && ac.section === sectionName) {
-          ac.isClassTeacher = false;
-        }
-      });
-      await teacher.save();
-    }
+    const academicYear = classData.academicYear;
+    // Set isClassTeacher to false for any assignments matching the criteria
+    await Teacher.updateOne(
+      { _id: removedTeacherId, schoolId: req.schoolId },
+      { $set: { 'assignedClasses.$[elem].isClassTeacher': false } },
+      {
+        arrayFilters: [
+          {
+            'elem.class': new mongoose.Types.ObjectId(classId),
+            'elem.section': sectionName,
+            'elem.academicYear': academicYear,
+          },
+        ],
+      }
+    );
   }
   
   return successResponse(res, 'Class teacher removed successfully');

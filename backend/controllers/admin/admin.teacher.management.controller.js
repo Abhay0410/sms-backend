@@ -49,10 +49,15 @@ export const getTeachersWithAssignments = asyncHandler(async (req, res) => {
 export const assignTeacherToSection = asyncHandler(async (req, res) => {
   const { teacherId, classId, sectionName, subjectName, isClassTeacher, academicYear, hoursPerWeek } = req.body;
   
-  if (!teacherId || !classId || !sectionName || !subjectName) {
-    throw new ValidationError('Teacher, class, section, and subject are required');
+  if (!teacherId || !classId || !sectionName || !subjectName || !academicYear) {
+    throw new ValidationError('Teacher, class, section, subject, and academic year are required');
   }
   
+  const teacher = await Teacher.findOne({ _id: teacherId, schoolId: req.schoolId });
+  if (!teacher) {
+    throw new NotFoundError('Teacher');
+  }
+
   const classData = await Class.findOne({
     _id: classId,
     schoolId: req.schoolId  // ✅ MULTI-TENANT
@@ -91,21 +96,46 @@ export const assignTeacherToSection = asyncHandler(async (req, res) => {
   
   await classData.save();
   
-  // Atomically update teacher's assigned classes to avoid validation on old data
-  const newAssignment = {
-    class: classId,
-    section: sectionName,
-    subject: subjectName,
-    academicYear: academicYear,
-    isClassTeacher: isClassTeacher || false,
-    hoursPerWeek: hoursPerWeek || 0
-  };
-
-  // Use $addToSet to prevent creating duplicate assignments
-  await Teacher.updateOne(
-    { _id: teacherId, schoolId: req.schoolId },
-    { $addToSet: { assignedClasses: newAssignment } }
+  // 2. FIXED: Update Teacher Model using updateOne to bypass old record validation
+  const hasExistingSubject = teacher.assignedClasses.some(ac => 
+    ac.class.toString() === classId && 
+    ac.section === sectionName && 
+    ac.subject === subjectName && 
+    ac.academicYear === academicYear
   );
+
+  if (hasExistingSubject) {
+    const updatePayload = {};
+    if (isClassTeacher !== undefined) updatePayload["assignedClasses.$.isClassTeacher"] = isClassTeacher;
+    if (hoursPerWeek !== undefined) updatePayload["assignedClasses.$.hoursPerWeek"] = hoursPerWeek;
+    
+    if (Object.keys(updatePayload).length > 0) {
+      await Teacher.updateOne(
+        { 
+          _id: teacherId, 
+          schoolId: req.schoolId,
+          "assignedClasses.class": classId,
+          "assignedClasses.section": sectionName,
+          "assignedClasses.subject": subjectName,
+          "assignedClasses.academicYear": academicYear
+        },
+        { $set: updatePayload }
+      );
+    }
+  } else {
+    await Teacher.updateOne(
+      { _id: teacherId, schoolId: req.schoolId },
+      { $push: { assignedClasses: {
+        class: classId,
+        section: sectionName,
+        subject: subjectName,
+        academicYear: academicYear,
+        isClassTeacher: isClassTeacher || false,
+        hoursPerWeek: hoursPerWeek || 0
+      } } }
+    );
+  }
+
   
   return successResponse(res, 'Teacher assigned successfully', {
     class: classData.className,
@@ -250,29 +280,44 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
   section.classTeacher = teacherId;
   await classData.save();
   
-  // 4. Update Teacher Model - The "Smart" Way
+  // 4. FIXED: Smart Atomic Update (Bypassing teacher.save())
   // Check if teacher already teaches ANY subject in this section
-  const existingAssignmentIndex = teacher.assignedClasses.findIndex(ac => 
+  const hasEntry = teacher.assignedClasses.some(ac => 
     ac.class.toString() === classId && 
     ac.section === sectionName && 
     ac.academicYear === academicYear
   );
 
-  if (existingAssignmentIndex > -1) {
-    // Teacher already assigned to a subject here, just flip the bit
-    teacher.assignedClasses[existingAssignmentIndex].isClassTeacher = true;
+  if (hasEntry) {
+    // If entry exists, just update the flag
+    await Teacher.updateOne(
+      { 
+        _id: teacherId, 
+        schoolId,
+        "assignedClasses.class": classId, 
+        "assignedClasses.section": sectionName,
+        "assignedClasses.academicYear": academicYear 
+      },
+      { $set: { "assignedClasses.$.isClassTeacher": true } }
+    );
   } else {
-    // Teacher is ONLY a class teacher (doesn't teach a subject yet)
-    teacher.assignedClasses.push({
-      class: classId,
-      section: sectionName,
-      subject: "Administrative", // Use a standard category instead of 'Class Teacher'
-      academicYear,
-      isClassTeacher: true
-    });
+    // If completely new entry
+    await Teacher.updateOne(
+      { _id: teacherId, schoolId },
+      { 
+        $push: { 
+          assignedClasses: { 
+            class: classId, 
+            section: sectionName, 
+            academicYear, 
+            isClassTeacher: true, 
+            subject: "Administrative" 
+          } 
+        } 
+      }
+    );
   }
   
-  await teacher.save();
   
   return successResponse(res, 'Class teacher assigned successfully', {
     class: classData.className,

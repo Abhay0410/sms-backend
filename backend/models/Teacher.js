@@ -55,6 +55,8 @@ const teacherSchema = new mongoose.Schema({
     class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class' },
     section: String,
     subject: String,
+    academicYear: { type: String, required: true },
+    hoursPerWeek: { type: Number, default: 0 },
     isClassTeacher: { type: Boolean, default: false }
   }],
   

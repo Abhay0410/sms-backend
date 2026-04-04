@@ -275,14 +275,20 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
 
   if (!classData) throw new NotFoundError('Class');
 
-  // 🔥 PUSH CORRECT FORMAT
-  teacher.assignedClasses.push({
-    class: classId,
-    section: sectionName,
-    isClassTeacher: true
-  });
-
-  await teacher.save();
+  // Atomically update teacher's assigned classes to avoid validation on old data
+  await Teacher.updateOne(
+    { _id: teacherId, schoolId: req.schoolId },
+    {
+      $addToSet: {
+        assignedClasses: {
+          class: classId,
+          section: sectionName,
+          isClassTeacher: true,
+          academicYear: classData.academicYear // Get from classData
+        }
+      }
+    }
+  );
 
   // Update class section
   const section = classData.sections.find(
@@ -320,16 +326,22 @@ export const assignSubjectTeacher = asyncHandler(async (req, res) => {
 
   if (!classData) throw new NotFoundError('Class');
 
-  // 🔥 PUSH SUBJECT ASSIGNMENT
-  teacher.assignedClasses.push({
-    class: classId,
-    section: sectionName,
-    subject: subjectName,
-    hoursPerWeek,
-    isClassTeacher: false
-  });
-
-  await teacher.save();
+  // Atomically update teacher's assigned classes to avoid validation on old data
+  await Teacher.updateOne(
+    { _id: teacherId, schoolId: req.schoolId },
+    {
+      $addToSet: {
+        assignedClasses: {
+          class: classId,
+          section: sectionName,
+          subject: subjectName,
+          hoursPerWeek,
+          isClassTeacher: false,
+          academicYear: classData.academicYear // Get from classData
+        }
+      }
+    }
+  );
 
   // Update class section subject teacher
   const section = classData.sections.find(

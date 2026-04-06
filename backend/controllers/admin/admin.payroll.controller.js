@@ -32,24 +32,13 @@ export const getAttendanceStats = asyncHandler(async (req, res) => {
 
   const processStats = async (staff, type) => {
     return await Promise.all(staff.map(async (member) => {
-      // ✅ FIX: Query StaffAttendance with date range
-      const records = await StaffAttendance.find({
-        teacherId: member._id, // StaffAttendance uses 'teacherId' for both roles
-        schoolId: new mongoose.Types.ObjectId(schoolId),
-        date: { $gte: startDate, $lte: endDate }
-      });
-
       const totalDaysInMonth = new Date(year, month, 0).getDate();
       
-      // ✅ FIX: Match status strings from your markAttendance logic
-      const presentDays = records.filter(r => ['PRESENT', 'LATE', 'HALF_DAY'].includes(r.status)).length;
-      
-      // Logic for Paid Leaves from your LeaveRequest model would go here if synced
+      // Bypass attendance calculation, grant full attendance
+      const presentDays = totalDaysInMonth;
       const paidLeaves = 0; 
-      
-      const lwp = records.filter(r => r.status === 'ABSENT').length;
-      
-      const attendanceFactor = totalDaysInMonth > 0 ? (presentDays + paidLeaves) / totalDaysInMonth : 0;
+      const lwp = 0;
+      const attendanceFactor = 1;
 
       return {
         teacherId: member._id,
@@ -162,34 +151,9 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
         continue;
       }
 
-      // Attendance fetching
-      const attendanceRecords = await StaffAttendance.find({
-        teacherId: employeeId,
-        schoolId,
-        date: { $gte: startDate, $lte: endDate }
-      });
-
-      const presentDays = attendanceRecords.filter(r => ['PRESENT', 'LATE', 'HALF_DAY'].includes(r.status)).length;
-      
-      // Approved Leaves logic
-      const approvedLeaves = await LeaveRequest.find({
-          teacherId: employeeId,
-          schoolId,
-          status: 'APPROVED',
-          startDate: { $lte: endDate },
-          endDate: { $gte: startDate }
-      });
-
-      let paidLeaveDays = 0;
-      approvedLeaves.forEach(leave => {
-          const overlapStart = new Date(Math.max(new Date(leave.startDate), startDate));
-          const overlapEnd = new Date(Math.min(new Date(leave.endDate), endDate));
-          const diffDays = Math.ceil(Math.abs(overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
-          paidLeaveDays += diffDays;
-      });
-
-      const totalPaidDays = presentDays + paidLeaveDays;
-      const attendanceFactor = Math.min(1, totalPaidDays / workingDaysInMonth);
+      // Full attendance granted regardless of records
+      const totalPaidDays = workingDaysInMonth;
+      const attendanceFactor = 1;
       
       // 🚀 MANUAL OVERRIDE LOGIC
       let baseGross;
@@ -201,9 +165,9 @@ export const runMonthlyPayroll = asyncHandler(async (req, res) => {
         // Calculate factor based on forced amount vs template gross
         overrideFactor = baseGross / structure.grossSalary; 
       } else {
-        // Normal attendance logic
-        baseGross = Math.round(structure.grossSalary * attendanceFactor);
-        overrideFactor = attendanceFactor;
+        // Normal logic (Full gross salary without attendance penalty)
+        baseGross = structure.grossSalary;
+        overrideFactor = 1;
       }
 
       // Extra Activities (Trips/Bonus)
@@ -619,22 +583,16 @@ export const generateMonthlyPayroll = asyncHandler(async (req, res) => {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
       
-      // Fetch attendance
-      const attendanceRecords = await StaffAttendance.find({
-        teacherId: structure.employeeId,
-        schoolId,
-        date: { $gte: startDate, $lte: endDate }
-      });
-
-      const presentDays = attendanceRecords.filter(r => ['PRESENT', 'LATE', 'HALF_DAY'].includes(r.status)).length;
+      // Bypass attendance fetching - grant full attendance
+      const presentDays = workingDaysInMonth;
       const paidLeaves = 0;
-      const paidDays = presentDays + paidLeaves;
-      const attendanceFactor = paidDays / workingDaysInMonth;
+      const paidDays = workingDaysInMonth;
+      const attendanceFactor = 1;
       
-      // Calculate salary
-      const monthlyGross = structure.grossSalary * attendanceFactor;
-      const monthlyBasic = structure.earnings.basic * attendanceFactor;
-      const monthlyDA = structure.earnings.da * attendanceFactor;
+      // Calculate salary based on full gross
+      const monthlyGross = structure.grossSalary;
+      const monthlyBasic = structure.earnings.basic;
+      const monthlyDA = structure.earnings.da;
       
       let pfBasis = monthlyBasic + monthlyDA;
       if (structure.limitPF && pfBasis > 15000) pfBasis = 15000;
@@ -652,8 +610,8 @@ export const generateMonthlyPayroll = asyncHandler(async (req, res) => {
         earnings: {
           basic: monthlyBasic,
           da: monthlyDA,
-          hra: structure.earnings.hra * attendanceFactor,
-          specialAllowance: structure.earnings.specialAllowance * attendanceFactor
+          hra: structure.earnings.hra,
+          specialAllowance: structure.earnings.specialAllowance
         },
         deductions: {
           ...structure.deductions,

@@ -121,7 +121,7 @@ export const getStudentById = asyncHandler(async (req, res) => {
 export const createStudentWithParent = asyncHandler(async (req, res) => {
   const {
     // Student details
-    studentName, studentEmail, dateOfBirth, gender, bloodGroup, religion, caste,
+    studentName, studentEmail, mobileNumber, dateOfBirth, gender, bloodGroup, religion, caste,
     nationality, aadharNumber,
     
     // Address
@@ -323,6 +323,7 @@ if (dateOfBirth) {
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name: studentName,
     email: studentEmail || undefined,
+    mobileNumber: mobileNumber || undefined,
     password: studentHashedPassword,
     studentID,
     dateOfBirth: formattedDOB,

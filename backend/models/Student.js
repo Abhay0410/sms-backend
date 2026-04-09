@@ -17,6 +17,7 @@ const studentSchema = new mongoose.Schema({
     trim: true,
     set: v => (v === '' || v === null) ? undefined : v // 🔥 Converts empty string to undefined
   },
+  mobileNumber: { type: String, required: true },
   password: { type: String, required: true },
   studentID: { type: String, required: true },
   rollNumber: { type: Number },

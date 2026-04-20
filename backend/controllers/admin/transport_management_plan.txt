@@ -1,0 +1,57 @@
+TRANSPORT MANAGEMENT SYSTEM - IMPLEMENTATION PLAN
+=================================================
+
+Objective:
+Integrate a comprehensive Transport Management module into the existing Multi-Tenant School Management System (SMS).
+
+Step 1: Database Schema Design (MongoDB/Mongoose)
+-------------------------------------------------
+We will create 4 new Mongoose models to keep data organized and properly isolated per school:
+1. Vehicle Model (`models/Vehicle.js`):
+   - Fields: schoolId, registrationNumber, capacity, type (Bus/Van/Car), make, model, year, status (Active/Maintenance/Retired).
+2. Transport Staff Model (`models/TransportStaff.js`):
+   - Fields: schoolId, name, type (Driver/Helper), phone, licenseNumber, licenseExpiry, address, assignedVehicle (Ref).
+3. Fuel Log Model (`models/FuelLog.js`):
+   - Fields: schoolId, vehicle (Ref), date, quantityLiters, totalCost, odometerReading, receiptNumber/Image, loggedBy.
+4. Trip/Logbook Model (`models/TripLog.js`):
+   - Fields: schoolId, vehicle (Ref), driver (Ref), date, startOdometer, endOdometer, routeDescription/Purpose, notes.
+
+Step 2: Backend Controllers (`controllers/admin/admin.transport.controller.js`)
+-------------------------------------------------------------------------------
+We will create a new controller handling all business logic, strictly applying the `req.schoolId` filter for multi-tenancy:
+1. Vehicle Management:
+   - `addVehicle()`, `updateVehicle()`, `deleteVehicle()`, `getVehicles()`.
+2. Driver/Helper Management:
+   - `addTransportStaff()`, `updateTransportStaff()`, `deleteTransportStaff()`, `getTransportStaff()`.
+3. Fuel Management (Diesel IN):
+   - `addFuelLog()`, `getFuelLogs()` (with filtering by date range and specific vehicles).
+4. Trip Logbook:
+   - `addTripLog()`, `getTripLogs()`.
+5. Reporting Engine:
+   - `getTransportReport()`: An aggregation pipeline that calculates total distance traveled, total fuel consumed, and overall fuel cost per vehicle for a specified month/year.
+
+Step 3: Backend Routes (`routes/admin.transport.routes.js`)
+-----------------------------------------------------------
+- Set up Express endpoints (e.g., `POST /api/admin/transport/vehicles`).
+- Protect routes using your existing authentication and multi-tenant middleware.
+
+Step 4: Frontend Development (UI/UX)
+--------------------------------------------
+1. Create a new "Transport" module in the Admin Sidebar.
+2. Develop UI Components:
+   - Vehicle Directory & Add/Edit Modals.
+   - Staff Directory (Drivers & Helpers).
+   - Logbook Entry Form (Daily start/end km) & History Table.
+   - Fuel Entry Form (Diesel In) & History Table.
+3. Develop Reports Dashboard:
+   - Visual charts (e.g., Monthly Fuel Expenditure).
+   - Tabular reports showing mileage/efficiency (Distance Traveled ÷ Fuel Consumed).
+
+Step 5: Testing & Validation
+----------------------------
+- Ensure multi-tenant isolation so schools only see their own transport data.
+- Validate logic (e.g., `endOdometer` must be greater than `startOdometer`).
+
+Known Issues & Troubleshooting
+----------------------------
+- Mongoose Aggregation pipelines (`aggregate()`) bypass Schema auto-casting. You must manually cast `req.schoolId` using `new mongoose.Types.ObjectId(req.schoolId)` inside the `$match` block, otherwise it will return empty datasets (zeros).

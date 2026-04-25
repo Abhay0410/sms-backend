@@ -1,6 +1,7 @@
 import fs from 'fs';
 import csv from 'csv-parser';
 import bcrypt from 'bcryptjs';
+import { Readable } from 'stream';
 import Student from '../../models/Student.js';
 import Parent from '../../models/Parent.js';
 import Class from '../../models/Class.js';
@@ -43,6 +44,28 @@ async function findClassRobust(schoolId, className, academicYear) {
 
   return null;
 }
+
+// 🛠️ HEALER: Ye function adhe-adhure names/rows ko jod deta hai
+const repairBrokenCSV = (filePath) => {
+  const content = fs.readFileSync(filePath, 'utf8').replace(/\r/g, "");
+  const lines = content.split('\n');
+  const fixedLines = [];
+  let buffer = "";
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+    // Agar line mein comma nahi hai, matlab ye pichli row ka bacha hua part hai
+    if (line.includes(',') || fixedLines.length === 0) {
+      if (buffer) fixedLines.push(buffer);
+      buffer = line;
+    } else {
+      buffer += " " + line;
+    }
+  }
+  if (buffer) fixedLines.push(buffer);
+  return fixedLines.join('\n');
+};
 
 // ============================================================
 // 1. IMPORT ACADEMICS (Robust Version)
@@ -190,16 +213,20 @@ export const importStudents = asyncHandler(async (req, res) => {
   const schoolId = req.schoolId;
   const { academicYear } = req.body;
   const filePath = req.file.path;
-  const rows = [];
 
   if (!academicYear) throw new ValidationError("Academic Year is required");
   
-  // ID Generation logic
+  // 1. 🛠️ Fix Broken CSV (Aarav \n Sharma -> Aarav Sharma)
+  const repairedCSV = repairBrokenCSV(filePath);
+  const rows = [];
+
+  // ID Counter fallback
   const year = new Date().getFullYear().toString().slice(-2);
   const lastStudent = await Student.findOne({ schoolId }).sort({ studentID: -1 });
   let studentCounter = (lastStudent && lastStudent.studentID) ? parseInt(lastStudent.studentID.slice(-4)) + 1 : 1;
 
-  fs.createReadStream(filePath)
+  // Stream from repaired string
+  Readable.from(repairedCSV)
     .pipe(csv())
     .on('data', (data) => rows.push(data))
     .on('end', async () => {
@@ -209,29 +236,34 @@ export const importStudents = asyncHandler(async (req, res) => {
 
         for (const row of rows) {
           try {
-            // 🧹 CLEANING LOGIC: Aapke CSV mein names break ho rahe hain, unhe clean karo
-            const rawName = getVal(row, 'Name').replace(/\r?\n|\r/g, " ").trim();
-            const rawParentName = getVal(row, 'ParentName').replace(/\r?\n|\r/g, " ").trim();
-            const csvAdmissionID = getVal(row, 'AdmissionID').trim();
+            const rawName = getVal(row, 'Name').trim();
             const className = getVal(row, 'ClassName').trim();
-            const email = getVal(row, 'Email').trim().toLowerCase();
+            const csvAdmissionID = getVal(row, 'AdmissionID').trim();
+            const csvStudentID = getVal(row, 'StudentID').trim();
 
-            if (!className || !rawName) continue;
+            if (!className || !rawName) {
+                console.log(`⚠️ Skipping incomplete row: ${JSON.stringify(row)}`);
+                continue;
+            }
 
-            // 1. Robust Class Lookup
+            // 2. 🆔 ID LOGIC: CSV wali ID ko priority do (STU26051)
+            let finalID = csvStudentID || csvAdmissionID;
+            if (!finalID) {
+                finalID = `STU${year}${studentCounter.toString().padStart(4, '0')}`;
+                studentCounter++;
+            }
+
+            // 3. Robust Class Check
             const targetClass = await findClassRobust(schoolId, className, academicYear);
             if (!targetClass) {
-              results.errors.push(`${rawName}: Class '${className}' not found`);
+              results.errors.push(`${rawName}: Class '${className}' not found for ${academicYear}`);
               continue;
             }
 
-            // 2. Strict Duplicate Check (Only within THIS school)
+            // 4. Duplicate Check
             const existing = await Student.findOne({ 
               schoolId, 
-              $or: [
-                { admissionNumber: csvAdmissionID },
-                ...(email ? [{ email }] : [])
-              ]
+              $or: [{ studentID: finalID }, { admissionNumber: csvAdmissionID }] 
             });
 
             if (existing) { 
@@ -239,60 +271,53 @@ export const importStudents = asyncHandler(async (req, res) => {
               continue; 
             }
 
-            // 3. Parent Handling (Unique PAR ID)
+            // 5. Parent Handling
             const parentPhone = getVal(row, 'ParentPhone');
-            const providedParentID = getVal(row, 'ParentID');
-            
-            let parent = await Parent.findOne({ 
-              schoolId, 
-              $or: [{ phone: parentPhone }, { parentID: providedParentID }] 
-            });
+            const parentIDFromCSV = getVal(row, 'ParentID');
+
+            let parent;
+            // Find parent by ID (priority) or phone
+            if (parentIDFromCSV) {
+                parent = await Parent.findOne({ schoolId, parentID: parentIDFromCSV });
+            }
+            if (!parent && parentPhone) {
+                parent = await Parent.findOne({ schoolId, phone: parentPhone });
+            }
 
             if (!parent) {
+              const finalParentID = parentIDFromCSV || `PAR${finalID.split('STU')[1] || Date.now()}`;
               parent = await Parent.create({
-                schoolId,
-                name: rawParentName,
-                phone: parentPhone,
-                email: getVal(row, 'ParentEmail') || `p_${csvAdmissionID}@school.com`,
-                password: pass,
-                parentID: providedParentID || `PAR${year}${results.success.toString().padStart(4, '0')}`,
-                relation: 'Guardian',
-                role: 'parent',
+                schoolId, 
+                name: getVal(row, 'ParentName') || 'Parent', 
+                phone: parentPhone || '0000000000',
+                email: getVal(row, 'ParentEmail') || `p_${finalParentID}@school.com`,
+                password: pass, 
+                parentID: finalParentID,
+                relation: 'Father', // ✅ FIX: Add required relation
+                role: 'parent', 
                 isActive: true,
               });
             }
 
-            // 4. Create Student
-            const studentID = csvAdmissionID || `STU${year}${studentCounter.toString().padStart(4, '0')}`;
+            // 6. 🚀 CREATE STUDENT
             const newStudent = await Student.create({
-              schoolId,
-              name: rawName,
-              studentID: studentID,
-              admissionNumber: csvAdmissionID,
-              email: email || undefined, // ✅ Fix: Allow empty emails (don't force dummy)
-              password: pass,
-              class: targetClass._id,
-              className: targetClass.className,
-              section: getVal(row, 'Section'),
-              rollNumber: parseInt(getVal(row, 'RollNumber')) || 0,
-              academicYear,
-              parent: parent._id,
-              gender: getVal(row, 'Gender') || 'Male',
-              fatherName: rawParentName,
-              status: 'ENROLLED'
+              schoolId, name: rawName, studentID: finalID, admissionNumber: csvAdmissionID,
+              password: pass, class: targetClass._id, className: targetClass.className,
+              section: getVal(row, 'Section') || 'A', academicYear, parent: parent._id,
+              gender: getVal(row, 'Gender') || 'Male', status: 'ENROLLED',
+              fatherName: getVal(row, 'ParentName') || rawName // ✅ FIX: Add required fatherName
             });
 
-            // Update Parent's children array
             await Parent.findByIdAndUpdate(parent._id, { $addToSet: { children: newStudent._id } });
-            
-            studentCounter++;
             results.success++;
+            console.log(`✅ Created: ${rawName} (${finalID})`);
+
           } catch (rowErr) {
             results.errors.push(`Error for ${getVal(row, 'Name')}: ${rowErr.message}`);
           }
         }
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        return successResponse(res, `Process Complete. Imported: ${results.success}, Skipped: ${results.skipped}`, results);
+        return successResponse(res, `Sync Finished. Created: ${results.success}`, results);
       } catch (err) {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         res.status(500).json({ success: false, message: err.message });

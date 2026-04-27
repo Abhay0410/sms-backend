@@ -84,7 +84,7 @@ export const getExpenses = asyncHandler(async (req, res) => {
 
   const expenses = await Expense.find(filter)
     .populate('category', 'name isSystemGenerated')
-    .sort({ date: -1 });
+    .sort({ date: -1, createdAt: -1 }); // Added createdAt as a tie-breaker for identical dates
 
   return successResponse(res, "Expenses retrieved successfully", expenses);
 });

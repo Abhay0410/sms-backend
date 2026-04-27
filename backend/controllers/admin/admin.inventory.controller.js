@@ -58,8 +58,11 @@ export const getInventoryItems = asyncHandler(async (req, res) => {
 // ==============================================
 
 export const purchaseInventoryItem = asyncHandler(async (req, res) => {
-  const { itemId, quantity, unitPrice, vendor, receiptNumber, purchaseDate } = req.body;
+  let { itemId, quantity, unitPrice, vendor, receiptNumber, purchaseDate } = req.body;
   const schoolId = req.schoolId;
+
+  quantity = Number(quantity);
+  unitPrice = Number(unitPrice);
 
   if (!quantity || !unitPrice || quantity <= 0 || unitPrice < 0) {
     throw new ValidationError("Valid quantity and unit price are required.");
@@ -128,8 +131,10 @@ export const getPurchases = asyncHandler(async (req, res) => {
 // ==============================================
 
 export const issueItem = asyncHandler(async (req, res) => {
-  const { itemId, quantity, issuedToType, issuedToRef, allocationDetails } = req.body;
+  let { itemId, quantity, issuedToType, issuedToRef, allocationDetails } = req.body;
   const schoolId = req.schoolId;
+
+  quantity = Number(quantity);
 
   if (!quantity || quantity <= 0) throw new ValidationError("Valid quantity required.");
 

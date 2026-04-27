@@ -12,6 +12,8 @@ import SchoolPolicy from '../../models/StaffSalaryPolicy.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
+import Expense from '../../models/Expense.js';
+import ExpenseCategory from '../../models/ExpenseCategory.js';
 
 // ✅ GET: Fetch attendance stats for payroll preparation (for Teachers & Admins)
 export const getAttendanceStats = asyncHandler(async (req, res) => {
@@ -354,6 +356,28 @@ export const markPayrollPaid = asyncHandler(async (req, res) => {
   if (!slip) {
     throw new NotFoundError("Payroll slip not found");
   }
+
+  // ✅ NEW: Sync with Expense Ledger
+  let category = await ExpenseCategory.findOne({ schoolId, name: 'Payroll', isSystemGenerated: true });
+  if (!category) {
+    category = await ExpenseCategory.create({ schoolId, name: 'Payroll', description: 'System generated category for staff payroll', isSystemGenerated: true });
+  }
+
+  let expPaymentMode = 'BANK_TRANSFER';
+  if (paymentMode && ['CASH', 'ONLINE', 'CHEQUE', 'CARD', 'BANK_TRANSFER', 'OTHER'].includes(paymentMode.toUpperCase())) {
+    expPaymentMode = paymentMode.toUpperCase();
+  }
+
+  await Expense.create({
+    schoolId,
+    category: category._id,
+    amount: slip.netSalary,
+    date: new Date(),
+    paymentMode: expPaymentMode,
+    source: 'PAYROLL',
+    referenceId: slip._id,
+    description: `Salary for month ${slip.month}/${slip.year}`
+  });
 
   return successResponse(res, "Payment status updated to PAID", slip);
 });

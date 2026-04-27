@@ -6,6 +6,8 @@ import TripLog from '../../models/TripLog.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
+import Expense from '../../models/Expense.js';
+import ExpenseCategory from '../../models/ExpenseCategory.js';
 
 // ==============================================
 // 1. VEHICLE MANAGEMENT
@@ -142,6 +144,24 @@ export const addFuelLog = asyncHandler(async (req, res) => {
     schoolId: req.schoolId,
     loggedBy: req.user.id // Captures the admin who made the entry
   });
+
+  // ✅ NEW: Sync with Expense Ledger
+  let category = await ExpenseCategory.findOne({ schoolId: req.schoolId, name: 'Transport Fuel', isSystemGenerated: true });
+  if (!category) {
+    category = await ExpenseCategory.create({ schoolId: req.schoolId, name: 'Transport Fuel', description: 'System generated category for vehicle fuel', isSystemGenerated: true });
+  }
+
+  await Expense.create({
+    schoolId: req.schoolId,
+    category: category._id,
+    amount: log.totalCost,
+    date: log.date || new Date(),
+    paymentMode: 'CASH', // default for fuel
+    source: 'TRANSPORT_FUEL',
+    referenceId: log._id,
+    description: `Fuel log added for vehicle`
+  });
+
   return successResponse(res, "Fuel log added successfully", log, 201);
 });
 
@@ -167,6 +187,19 @@ export const getFuelLogs = asyncHandler(async (req, res) => {
   }));
 
   return successResponse(res, "Fuel logs retrieved successfully", formattedLogs);
+});
+
+// ✅ NEW: Required so the system cleans up the related expense when log is deleted
+export const deleteFuelLog = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const log = await FuelLog.findOneAndDelete({ _id: id, schoolId: req.schoolId });
+  if (!log) throw new NotFoundError("Fuel Log");
+
+  // Sync with Expense Ledger: Remove the associated expense
+  await Expense.findOneAndDelete({ schoolId: req.schoolId, source: 'TRANSPORT_FUEL', referenceId: id });
+
+  return successResponse(res, "Fuel log and associated expense deleted successfully");
 });
 
 // ==============================================

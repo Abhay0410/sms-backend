@@ -53,6 +53,8 @@ import teacherPayrollRoutes from "./routes/admin/admin.payroll.routes.js";
 import adminLibraryRoutes from "./routes/admin/admin.library.routes.js";
 import adminOnboardingRoutes from "./routes/admin/onboarding.routes.js";
 import adminTransportRoutes from "./routes/admin/admin.transport.routes.js";
+import adminExpenseRoutes from "./routes/admin/admin.expense.routes.js";
+import adminInventoryRoutes from "./routes/admin/admin.inventory.routes.js";
 import sessionRoutes from "./routes/session/session.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -238,6 +240,8 @@ app.use("/api/parent/messages", parentMessageRoutes);
 app.use("/api/admin/library", adminLibraryRoutes);
 app.use("/api/admin/onboarding", adminOnboardingRoutes);
 app.use("/api/admin/transport", adminTransportRoutes);
+app.use("/api/admin/expense", adminExpenseRoutes);
+app.use("/api/admin/inventory", adminInventoryRoutes);
 
 if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");

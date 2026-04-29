@@ -58,8 +58,10 @@ export const getInventoryItems = asyncHandler(async (req, res) => {
 // ==============================================
 
 export const purchaseInventoryItem = asyncHandler(async (req, res) => {
-  let { itemId, quantity, unitPrice, vendor, receiptNumber, purchaseDate } = req.body;
+  let { itemId, quantity, unitPrice, vendor, vendorName, receiptNumber, purchaseDate } = req.body;
   const schoolId = req.schoolId;
+
+  const finalVendor = vendor || vendorName || 'Unknown Vendor';
 
   quantity = Number(quantity);
   unitPrice = Number(unitPrice);
@@ -80,7 +82,7 @@ export const purchaseInventoryItem = asyncHandler(async (req, res) => {
     quantity,
     unitPrice,
     totalAmount,
-    vendor,
+    vendor: finalVendor,
     receiptNumber,
     purchaseDate: purchaseDate || new Date()
   });
@@ -104,7 +106,7 @@ export const purchaseInventoryItem = asyncHandler(async (req, res) => {
     paymentMode: 'CASH', // Admin can edit this later in the expense module if needed
     source: 'INVENTORY_PURCHASE',
     referenceId: purchase._id,
-    description: `Purchased ${quantity} ${item.unit} of ${item.itemName} from ${vendor || 'Unknown Vendor'}`
+    description: `Purchased ${quantity} ${item.unit} of ${item.itemName} from ${finalVendor}`
   });
 
   // Link the expense back to the purchase

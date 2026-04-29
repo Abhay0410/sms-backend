@@ -12,7 +12,8 @@ export const getAllStaffAttendance = asyncHandler(async (req, res) => {
     const attendance = await StaffAttendance.find({ 
         schoolId: req.schoolId,
         date: searchDate 
-    }).populate('teacherId', 'name teacherID department');
+    }).populate('teacherId', 'name teacherID department')
+      .lean();
 
     return successResponse(res, 'Staff attendance retrieved', attendance);
 });

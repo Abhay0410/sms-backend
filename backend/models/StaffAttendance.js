@@ -8,7 +8,12 @@ const staffAttendanceSchema = new mongoose.Schema({
   status: { type: String, enum: ['PRESENT', 'ABSENT', 'LATE', 'HALF_DAY'], default: 'PRESENT' },
   checkIn: String,
   checkOut: String,
-  remarks: String
+  remarks: String,
+  location: {
+    latitude: Number,
+    longitude: Number,
+    accuracy: Number
+  }
 }, { timestamps: true });
 
 export default mongoose.model('StaffAttendance', staffAttendanceSchema);

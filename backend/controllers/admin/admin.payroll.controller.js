@@ -339,14 +339,16 @@ export const markPayrollPaid = asyncHandler(async (req, res) => {
   const { transactionId, paymentMode } = req.body; // IMPS, NEFT, etc.
   const schoolId = req.schoolId;
 
-  if (!transactionId) throw new ValidationError("Transaction ID is required");
+  if (paymentMode !== 'CASH' && !transactionId) {
+    throw new ValidationError("Transaction ID is required for online payments");
+  }
 
   const slip = await Payroll.findOneAndUpdate(
     { _id: slipId, schoolId, isTemplate: false },
     {
       paymentStatus: 'PAID',
       paymentDate: new Date(),
-      transactionId: transactionId.toUpperCase(),
+      transactionId: paymentMode === 'CASH' ? 'CASH_PAYMENT' : transactionId.toUpperCase(),
       paymentMode: paymentMode || 'NEFT',
       updatedAt: new Date()
     },
@@ -862,7 +864,12 @@ export const downloadSalarySlip = asyncHandler(async (req, res) => {
             doc.moveDown();
             doc.fontSize(10).font('Helvetica-Bold').fillColor('#059669'); // Green color
             doc.text(`PAYMENT CONFIRMED`, { align: 'center' });
-            doc.fontSize(9).fillColor('#475569').text(`Transaction ID: ${slip.transactionId}`, { align: 'center' });
+            doc.fontSize(9).fillColor('#475569');
+            if (slip.paymentMode === 'CASH') {
+                doc.text(`Payment Mode: CASH`, { align: 'center' });
+            } else {
+                doc.text(`Transaction ID: ${slip.transactionId}`, { align: 'center' });
+            }
             doc.text(`Payment Date: ${new Date(slip.paymentDate).toLocaleDateString('en-IN')}`, { align: 'center' });
         }
 

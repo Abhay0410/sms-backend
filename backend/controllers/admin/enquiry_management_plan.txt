@@ -1,0 +1,106 @@
+ENQUIRY & LEAD MANAGEMENT SYSTEM - IMPLEMENTATION PLAN
+======================================================
+
+Overview & Objective
+--------------------
+In a school, the "Product" is education, the "Customer" is the Parent, and the "Lead" is the Enquiry.
+This module will track intent and timeline for prospective admissions. It includes a Kanban-style workflow, automated task generation, and one-click conversion to a registered Student, seamlessly integrating with the Inventory and Expense modules.
+
+STEP 1: DATABASE SCHEMA DESIGN (MongoDB / Mongoose)
+---------------------------------------------------
+We need 2 new collections, strictly enforcing `schoolId` for multi-tenancy.
+
+1. Enquiry Master Model (`models/Enquiry.js`)
+   - Fields: schoolId, academicYear, enquiryDate, assignedTo (Ref to Admin/Sales)
+   - Student Details: studentName, age, targetClass (Ref to Class), gender, previousSchool
+   - Parent Details: parentName, primaryPhone, secondaryPhone, email, address, occupation
+   - Metadata:
+     - source: Enum ['WALK_IN', 'WEBSITE', 'FACEBOOK', 'REFERRAL', 'NEWSPAPER', 'OTHER']
+     - priority: Enum ['HOT', 'WARM', 'COLD']
+     - status: Enum ['NEW', 'PENDING', 'FOLLOWED_UP', 'VISITED', 'ADMITTED', 'CLOSED_LOST']
+   - latestFollowUpDate: Date (For quick dashboard sorting)
+   - nextActionDate: Date (For Overdue/Today's Task alerts)
+   - closeReason: String (Only if status is CLOSED_LOST)
+
+2. Follow-up Log Model (`models/EnquiryFollowUp.js`)
+   - Fields: schoolId, enquiry (Ref to Enquiry), followedBy (Ref to Admin/Sales)
+   - followUpDate: Date
+   - nextActionDate: Date
+   - outcome: Enum ['BUSY', 'CALL_LATER', 'INTERESTED', 'NOT_INTERESTED', 'VISIT_SCHEDULED']
+   - conversationNotes: String
+
+
+STEP 2: THE PROFESSIONAL SALES FLOW (Backend Controllers)
+---------------------------------------------------------
+Action: Create `controllers/admin/admin.enquiry.controller.js`
+
+1. Stage 1: Capture (`createEnquiry`)
+   - Admin/Counselor fills the form.
+   - Status defaults to 'NEW'.
+   - (Future Automation: Trigger WhatsApp/SMS API to send a greeting).
+   - *Inventory Integration*: If they buy a Prospectus, deduct 1 'Prospectus' from `InventoryItem` and record the Revenue/Fee.
+
+2. Stage 2 & 3: Qualification & Follow-up Loop (`addFollowUp`)
+   - Takes `enquiryId`, `conversationNotes`, `outcome`, `nextActionDate`.
+   - Saves to `EnquiryFollowUp` collection.
+   - Automatically updates the parent `Enquiry` record:
+     - status changes to 'FOLLOWED_UP' (or 'PENDING' if phone was switched off).
+     - nextActionDate is updated to push it to future task lists.
+
+3. Stage 4: The Visit (`updateEnquiryStatus`)
+   - Manually updates status to 'VISITED'.
+   - Auto-upgrades Priority to 'HOT'.
+
+4. Stage 5: Closure (`convertEnquiryToStudent` & `closeEnquiry`)
+   - `closeEnquiry`: Marks status as 'CLOSED_LOST', records `closeReason`.
+   - `convertEnquiryToStudent`:
+     a. Takes `enquiryId`.
+     b. Fetches Enquiry data and automatically calls your existing `createStudentWithParent` logic.
+     c. Copies Parent details -> Creates Parent.
+     d. Copies Student details -> Creates Student in 'REGISTERED'/'ENROLLED' status.
+     e. Marks Enquiry status as 'ADMITTED'.
+
+
+STEP 3: DASHBOARD & REPORTING ENGINE
+------------------------------------
+Action: Add queries to `admin.enquiry.controller.js`
+
+1. Kanban & Task View API (`getEnquiryDashboard`)
+   - Returns grouped data based on state machine logic:
+     - "Today's Tasks": Enquiries where `nextActionDate` is today.
+     - "Overdue": Enquiries where `nextActionDate` < today AND status not in ['ADMITTED', 'CLOSED_LOST'].
+     - "Pipeline": Groups active leads by Status (NEW, FOLLOWED_UP, VISITED) for Kanban board dragging.
+
+2. Conversion Analytics API (`getEnquiryAnalytics`)
+   - Calculates the Funnel: Total Leads -> Total Follow-ups -> Visited -> Admitted.
+   - Calculates Conversion Rate (Admitted / Total Leads * 100).
+
+
+STEP 4: TECHNICAL INTEGRATIONS
+------------------------------
+1. Inventory Module Link (Prospectus Sale):
+   - When an Enquiry is created, frontend sends a flag: `purchasedProspectus: true`.
+   - Backend calls `InventoryItem.findOneAndUpdate({ itemName: 'Prospectus' }, { $inc: { inStorage: -1 } })`.
+
+2. Expense Module Link (Customer Acquisition Cost - CAC):
+   - Marketing Expenses are added using the existing `addManualExpense` API with category "Marketing".
+   - Analytics API will query the `Expense` collection for "Marketing" category in the current Academic Year.
+   - CAC Formula = (Total Marketing Expense) / (Total Enquiries marked ADMITTED).
+
+
+SUMMARY OF THE "PUSH" LOGIC (State Machine)
+-------------------------------------------
+- NEW: Brand new entry, no action taken.
+- PENDING: Action attempted (e.g., called, didn't pick up), or missed follow-up.
+- FOLLOWED_UP: Parent was spoken to, next action is scheduled.
+- VISITED: Parent physically visited the campus.
+- ADMITTED: "Completed - Success". Student ID generated. Lead locked.
+- CLOSED_LOST: "Completed - Fail". Officially marked not interested. Lead locked.
+
+
+NEXT STEPS FOR DEVELOPMENT:
+---------------------------
+1. Create `Enquiry.js` and `EnquiryFollowUp.js` in the `models` folder.
+2. Scaffold `admin.enquiry.controller.js` with CRUD operations.
+3. Build the `convertEnquiryToStudent` bridging logic.
+4. Wire up the routes in `routes/admin.enquiry.routes.js`.

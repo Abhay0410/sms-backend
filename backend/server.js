@@ -28,6 +28,7 @@ import adminStudentManagementRoutes from "./routes/admin/admin.student.managemen
 import adminSubjectManagementRoutes from "./routes/admin/admin.subject.management.routes.js";
 import adminTimetableRoutes from "./routes/admin/admin.timetable.routes.js";
 import adminFeeRoutes from "./routes/admin/admin.fee.routes.js";
+import adminEnquiryRoutes from "./routes/admin/admin.enquiry.routes.js";
 import adminAnnouncementRoutes from "./routes/admin/admin.announcement.routes.js";
 import adminResultRoutes from "./routes/admin/admin.result.routes.js";
 import teacherAttendanceRoutes from "./routes/teacher/teacher.attendance.routes.js";
@@ -212,6 +213,8 @@ app.use("/api/admin/student-management", adminStudentManagementRoutes);
 app.use("/api/admin/subject-management", adminSubjectManagementRoutes);
 app.use("/api/admin/timetable", adminTimetableRoutes);
 app.use("/api/admin/fees", adminFeeRoutes);
+app.use("/api/admin/enquiry", adminEnquiryRoutes); // Matches frontend constants
+app.use("/api/admin/enquiries", adminEnquiryRoutes); // Kept for backward compatibility
 app.use("/api/admin/announcements", adminAnnouncementRoutes);
 app.use("/api/admin/results", adminResultRoutes);
 app.use("/api/teacher/attendance", teacherAttendanceRoutes);

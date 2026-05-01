@@ -28,6 +28,7 @@ import adminStudentManagementRoutes from "./routes/admin/admin.student.managemen
 import adminSubjectManagementRoutes from "./routes/admin/admin.subject.management.routes.js";
 import adminTimetableRoutes from "./routes/admin/admin.timetable.routes.js";
 import adminFeeRoutes from "./routes/admin/admin.fee.routes.js";
+import adminEnquiryRoutes from "./routes/admin/admin.enquiry.routes.js";
 import adminAnnouncementRoutes from "./routes/admin/admin.announcement.routes.js";
 import adminResultRoutes from "./routes/admin/admin.result.routes.js";
 import teacherAttendanceRoutes from "./routes/teacher/teacher.attendance.routes.js";
@@ -53,6 +54,8 @@ import teacherPayrollRoutes from "./routes/admin/admin.payroll.routes.js";
 import adminLibraryRoutes from "./routes/admin/admin.library.routes.js";
 import adminOnboardingRoutes from "./routes/admin/onboarding.routes.js";
 import adminTransportRoutes from "./routes/admin/admin.transport.routes.js";
+import adminExpenseRoutes from "./routes/admin/admin.expense.routes.js";
+import adminInventoryRoutes from "./routes/admin/admin.inventory.routes.js";
 import sessionRoutes from "./routes/session/session.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -210,6 +213,8 @@ app.use("/api/admin/student-management", adminStudentManagementRoutes);
 app.use("/api/admin/subject-management", adminSubjectManagementRoutes);
 app.use("/api/admin/timetable", adminTimetableRoutes);
 app.use("/api/admin/fees", adminFeeRoutes);
+app.use("/api/admin/enquiry", adminEnquiryRoutes); // Matches frontend constants
+app.use("/api/admin/enquiries", adminEnquiryRoutes); // Kept for backward compatibility
 app.use("/api/admin/announcements", adminAnnouncementRoutes);
 app.use("/api/admin/results", adminResultRoutes);
 app.use("/api/teacher/attendance", teacherAttendanceRoutes);
@@ -238,6 +243,8 @@ app.use("/api/parent/messages", parentMessageRoutes);
 app.use("/api/admin/library", adminLibraryRoutes);
 app.use("/api/admin/onboarding", adminOnboardingRoutes);
 app.use("/api/admin/transport", adminTransportRoutes);
+app.use("/api/admin/expense", adminExpenseRoutes);
+app.use("/api/admin/inventory", adminInventoryRoutes);
 
 if (isProd) {
   const frontendPath = path.join(__dirname, "../frontend/dist");

@@ -12,6 +12,8 @@ import SchoolPolicy from '../../models/StaffSalaryPolicy.js';
 import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
+import Expense from '../../models/Expense.js';
+import ExpenseCategory from '../../models/ExpenseCategory.js';
 
 // ✅ GET: Fetch attendance stats for payroll preparation (for Teachers & Admins)
 export const getAttendanceStats = asyncHandler(async (req, res) => {
@@ -337,14 +339,16 @@ export const markPayrollPaid = asyncHandler(async (req, res) => {
   const { transactionId, paymentMode } = req.body; // IMPS, NEFT, etc.
   const schoolId = req.schoolId;
 
-  if (!transactionId) throw new ValidationError("Transaction ID is required");
+  if (paymentMode !== 'CASH' && !transactionId) {
+    throw new ValidationError("Transaction ID is required for online payments");
+  }
 
   const slip = await Payroll.findOneAndUpdate(
     { _id: slipId, schoolId, isTemplate: false },
     {
       paymentStatus: 'PAID',
       paymentDate: new Date(),
-      transactionId: transactionId.toUpperCase(),
+      transactionId: paymentMode === 'CASH' ? 'CASH_PAYMENT' : transactionId.toUpperCase(),
       paymentMode: paymentMode || 'NEFT',
       updatedAt: new Date()
     },
@@ -354,6 +358,28 @@ export const markPayrollPaid = asyncHandler(async (req, res) => {
   if (!slip) {
     throw new NotFoundError("Payroll slip not found");
   }
+
+  // ✅ NEW: Sync with Expense Ledger
+  let category = await ExpenseCategory.findOne({ schoolId, name: 'Payroll', isSystemGenerated: true });
+  if (!category) {
+    category = await ExpenseCategory.create({ schoolId, name: 'Payroll', description: 'System generated category for staff payroll', isSystemGenerated: true });
+  }
+
+  let expPaymentMode = 'BANK_TRANSFER';
+  if (paymentMode && ['CASH', 'ONLINE', 'CHEQUE', 'CARD', 'BANK_TRANSFER', 'OTHER'].includes(paymentMode.toUpperCase())) {
+    expPaymentMode = paymentMode.toUpperCase();
+  }
+
+  await Expense.create({
+    schoolId,
+    category: category._id,
+    amount: slip.netSalary,
+    date: new Date(),
+    paymentMode: expPaymentMode,
+    source: 'PAYROLL',
+    referenceId: slip._id,
+    description: `Salary for month ${slip.month}/${slip.year}`
+  });
 
   return successResponse(res, "Payment status updated to PAID", slip);
 });
@@ -838,7 +864,12 @@ export const downloadSalarySlip = asyncHandler(async (req, res) => {
             doc.moveDown();
             doc.fontSize(10).font('Helvetica-Bold').fillColor('#059669'); // Green color
             doc.text(`PAYMENT CONFIRMED`, { align: 'center' });
-            doc.fontSize(9).fillColor('#475569').text(`Transaction ID: ${slip.transactionId}`, { align: 'center' });
+            doc.fontSize(9).fillColor('#475569');
+            if (slip.paymentMode === 'CASH') {
+                doc.text(`Payment Mode: CASH`, { align: 'center' });
+            } else {
+                doc.text(`Transaction ID: ${slip.transactionId}`, { align: 'center' });
+            }
             doc.text(`Payment Date: ${new Date(slip.paymentDate).toLocaleDateString('en-IN')}`, { align: 'center' });
         }
 

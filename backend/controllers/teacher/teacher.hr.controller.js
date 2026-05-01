@@ -13,6 +13,12 @@ export const markAttendance = asyncHandler(async (req, res) => {
     const teacherId = req.user.id;
     const schoolId = req.schoolId;
     const today = new Date().setHours(0, 0, 0, 0);
+    const { latitude, longitude, accuracy } = req.body;
+
+    // Safely extract location whether frontend sends it flat or nested inside an object
+    const finalLat = latitude || req.body.location?.latitude;
+    const finalLng = longitude || req.body.location?.longitude;
+    const finalAcc = accuracy || req.body.location?.accuracy;
 
     // Check if already marked for today
     const existingRecord = await StaffAttendance.findOne({
@@ -30,7 +36,8 @@ export const markAttendance = asyncHandler(async (req, res) => {
         teacherId,
         date: today,
         checkIn: new Date().toLocaleTimeString('en-IN', { hour12: false }),
-        status: 'PRESENT'
+        status: 'PRESENT',
+        location: (finalLat && finalLng) ? { latitude: finalLat, longitude: finalLng, accuracy: finalAcc } : undefined
     });
 
     await newRecord.save();

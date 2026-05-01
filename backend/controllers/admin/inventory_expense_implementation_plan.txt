@@ -1,0 +1,138 @@
+INVENTORY & EXPENSE MANAGEMENT - IMPLEMENTATION PLAN
+====================================================
+
+Overview & Architecture
+-----------------------
+The goal is to build a "Centralized Financial Ledger" (Expense Module) and a "Smart Inventory System".
+To keep data synchronized across Transport, Payroll, and Inventory, we will use an Event-Driven/Hook approach. 
+The Expense collection will have a `source` field to identify where the expense originated.
+
+
+STEP 1: DATABASE SCHEMA DESIGN (MongoDB / Mongoose)
+---------------------------------------------------
+We need 5 new collections, all strictly enforcing `schoolId` for multi-tenancy.
+
+1. Expense Category Model (`models/ExpenseCategory.js`)
+   - Fields: schoolId, name, description, isSystemGenerated (Boolean - to prevent admin from deleting core categories like 'Payroll' or 'Transport').
+
+2. Expense Ledger Model (`models/Expense.js`)
+   - Fields: schoolId, category (Ref), amount, date, paymentMode, 
+   - source: Enum ['MANUAL', 'INVENTORY_PURCHASE', 'PAYROLL', 'TRANSPORT_FUEL', 'MAINTENANCE']
+   - referenceId: ObjectId (Links to the original Purchase, FuelLog, or Payroll slip)
+   - description: String
+
+3. Inventory Item Master (`models/InventoryItem.js`)
+   - Fields: schoolId, itemName, category (e.g., IT, Furniture, Academic), 
+   - itemType: Enum ['ASSET', 'CONSUMABLE']
+   - unit: String (e.g., Pcs, Boxes)
+   - inStorage: Number (Default 0 - Stock available to issue)
+   - inUse: Number (Default 0 - Allocated stock)
+   - damaged: Number (Default 0)
+   - minimumStockLevel: Number (For low stock alerts)
+
+4. Inventory Purchase Model (`models/InventoryPurchase.js`)
+   - Fields: schoolId, item (Ref), quantity, unitPrice, totalAmount, vendor, purchaseDate, receiptNumber
+   - expenseRef: ObjectId (Ref to Expense Ledger)
+
+5. Inventory Issue/Allocation Model (`models/InventoryIssue.js`)
+   - Fields: schoolId, item (Ref), quantity, issueDate, returnDate
+   - issuedToType: Enum ['CLASS', 'USER', 'DEPARTMENT', 'ROOM']
+   - issuedToRef: ObjectId (Ref to Class, Student, Teacher, or generic string)
+   - status: Enum ['ISSUED', 'CONSUMED', 'RETURNED', 'DAMAGED']
+   - allocationDetails: Schema.Types.Mixed (To store dynamic custom data like Serial Numbers, PC configurations, etc.)
+
+
+STEP 2: EXPENSE MODULE INTEGRATION (The Financial Hub)
+------------------------------------------------------
+Action: Create `controllers/admin/admin.expense.controller.js`
+
+1. Core Expense APIs: 
+   - `addExpenseCategory()`, `getExpenseCategories()`
+   - `addManualExpense()`, `getExpenses()`
+
+2. Integration with Payroll:
+   - Modify `admin.payroll.controller.js` -> `markPayrollPaid()`.
+   - When a salary slip is marked as "PAID", automatically create an Expense document with `source: 'PAYROLL'` and `referenceId: slipId`.
+
+3. Integration with Transport:
+   - Modify `admin.transport.controller.js` -> `addFuelLog()`.
+   - When a fuel log is added, automatically create an Expense document with `source: 'TRANSPORT_FUEL'`.
+   - (Important: If a FuelLog is deleted, the linked Expense must also be deleted).
+
+
+STEP 3: INVENTORY MASTER & PURCHASE (Stock In)
+----------------------------------------------
+Action: Create `controllers/admin/admin.inventory.controller.js`
+
+1. Item Management:
+   - `addInventoryItem()`: Creates the master record (inStorage = 0).
+   - `getInventoryItems()`: Add a filter `?inStorageOnly=true` which maps to `{ inStorage: { $gt: 0 } }`. This solves your requirement to ONLY see items currently available in storage.
+
+2. Purchasing Stock (`purchaseInventoryItem`):
+   - Takes `itemId`, `quantity`, `unitPrice`, `vendor`.
+   - Logic:
+     a. Increment `inStorage` in the `InventoryItem` by `quantity`.
+     b. Create an `InventoryPurchase` record.
+     c. Automatically create an `Expense` record with `source: 'INVENTORY_PURCHASE'`.
+
+
+STEP 4: INVENTORY ALLOCATION ENGINE (Stock Out)
+-----------------------------------------------
+Action: Add allocation logic to `admin.inventory.controller.js`
+
+Handling ASSETS vs CONSUMABLES during the `issueItem()` API:
+
+- Scenario A: Issuing a CONSUMABLE (e.g., Chalks, Markers)
+  - Frontend sends: `itemId`, `quantity`, `issuedToType: 'CLASS'`, `issuedToRef: classId`.
+  - Backend verifies `itemType === 'CONSUMABLE'`.
+  - Logic: 
+    - Deduct `quantity` from `inStorage`.
+    - Create `InventoryIssue` record with `status: 'CONSUMED'`.
+  - Result: Chalk is gone from storage, tracked as consumed by that class.
+
+- Scenario B: Issuing an ASSET (e.g., Desks, Projectors)
+  - Frontend sends: `itemId`, `quantity`, `issuedToType: 'ROOM'`, `allocationDetails: { serialNumbers: ['XYZ123', 'XYZ124'] }`.
+  - Backend verifies `itemType === 'ASSET'`.
+  - Logic:
+    - Deduct `quantity` from `inStorage`.
+    - Add `quantity` to `inUse`.
+    - Create `InventoryIssue` record with `status: 'ISSUED'`.
+
+
+STEP 5: ASSET LIFECYCLE (Returns & Damages)
+-------------------------------------------
+Assets don't stay issued forever. We need an API: `updateIssueStatus()`.
+
+- Scenario A: Returning an Asset to Storage
+  - Admin marks an issued projector as 'RETURNED'.
+  - Logic: Deduct from `inUse`, Add back to `inStorage`.
+
+- Scenario B: Asset is Damaged
+  - Admin marks 5 issued chairs as 'DAMAGED'.
+  - Logic: Deduct from `inUse`, Add to `damaged`.
+
+
+STEP 6: REPORTING & DASHBOARDS
+------------------------------
+1. Financial Dashboard API (`getFinancialSummary`):
+   - Use MongoDB Aggregation on the `Expense` collection.
+   - Group by `category` and `source` to show beautiful Pie Charts (e.g., 40% Salary, 20% Transport, 40% Inventory).
+
+2. Inventory Consumption Report API (`getConsumptionReport`):
+   - Group `InventoryIssue` records by `issuedToRef`.
+   - Allows admin to see exactly which Teacher or Class is consuming the most chalks/markers.
+
+
+POTENTIAL PITFALLS & HOW WE SOLVED THEM:
+----------------------------------------
+1. Data Desync (The biggest risk): 
+   - Problem: Admin deletes a Fuel Log, but the Expense record remains.
+   - Solution: Use Mongoose Post-Delete Hooks OR manual deletion in the controller using `referenceId` whenever the parent record is deleted.
+
+2. Dynamic Allocation Data:
+   - Problem: IT needs MAC Addresses, but Furniture just needs a Room Number.
+   - Solution: The `allocationDetails: Schema.Types.Mixed` field acts as a flexible JSON object where frontend can send any custom key-value pairs depending on the category.
+
+3. Knowing what is available:
+   - Problem: Displaying only unused items.
+   - Solution: The `inStorage` field strictly represents "Idle/Available" items. The `inUse` field strictly represents "Deployed" items.

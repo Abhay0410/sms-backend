@@ -20,6 +20,11 @@ const studentSchema = new mongoose.Schema({
   mobileNumber: { type: String, required: true },
   password: { type: String, required: true },
   studentID: { type: String, required: true },
+
+   // ✅ NEW FIELDS
+  enrollmentNumber: { type: String, trim: true },
+  scholarNumber: { type: String, trim: true },
+
   rollNumber: { type: Number },
   dateOfBirth: { type: Date },
   phone: { type: String }, 
@@ -31,6 +36,7 @@ const studentSchema = new mongoose.Schema({
   nationality: { type: String, default: 'Indian' },
   aadharNumber: { type: String, unique: true, sparse: true },
   
+  isHandicapped: { type: Boolean, default: false },
   // Address
   address: {
     street: String,
@@ -44,16 +50,26 @@ const studentSchema = new mongoose.Schema({
   ref: "Parent"
 },
 
+
+bankName: String,
+  accountNumber: String,
+  ifscCode: String,
+  accountHolderName: String,
+  scholarshipName: String,
+  ssid: String,
+
   
   // Parents/Guardian Info
   fatherName: { type: String, required: true },
   fatherOccupation: String,
   fatherPhone: String,
   fatherEmail: String,
+  fatherQualification: String,
   motherName: String,
   motherOccupation: String,
   motherPhone: String,
   motherEmail: String,
+motherQualification: String,
   guardianName: String,
   guardianRelation: String,
   guardianPhone: String,
@@ -118,6 +134,13 @@ studentSchema.index(
     partialFilterExpression: { email: { $type: "string" } } 
   }
 );
+
+// ✅ NEW UNIQUE INDEXES (IMPORTANT)
+studentSchema.index(
+  { schoolId: 1, enrollmentNumber: 1 },
+  { unique: true, sparse: true }
+);
+
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 studentSchema.index({ schoolId: 1, academicYear: 1, status: 1 });
 

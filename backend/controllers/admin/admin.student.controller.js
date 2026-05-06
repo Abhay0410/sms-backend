@@ -144,7 +144,24 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     
     // Transport & Hostel
     transportRequired, busRoute, pickupPoint,
-    hostelResident, hostelBlock, roomNumber
+    hostelResident, hostelBlock, roomNumber,
+
+// ✅ NEW FIELDS
+  enrollmentNumber,
+  scholarNumber,
+
+ 
+
+  isHandicapped,
+
+  bankName,
+  accountNumber,
+  ifscCode,
+  accountHolderName,
+  scholarshipName,
+  ssid
+
+
   } = req.body;
 
     // dateOfBirth: new Date(req.body.dateOfBirth),
@@ -186,23 +203,36 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   // Check if student email exists - MULTI-TENANT
   if (studentEmail) {
     const existingStudent = await Student.findOne({ 
-      email: studentEmail,
+      email: studentEmail.toLowerCase().trim(),
       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
     });
     if (existingStudent) {
       throw new ValidationError(`Student email ${studentEmail} is already registered`);
     }
   }
+
+
+
   
   // Check if aadhar number exists - MULTI-TENANT
   if (aadharNumber) {
     const existingAadhar = await Student.findOne({ 
-      aadharNumber,
+      aadharNumber:aadharNumber?.trim(),
       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
     });
     if (existingAadhar) {
       throw new ValidationError(`Aadhar number ${aadharNumber} is already registered`);
     }
+  }
+
+    if (enrollmentNumber) {
+    const exists = await Student.findOne({ enrollmentNumber, schoolId: req.schoolId });
+    if (exists) throw new ValidationError("Enrollment number already exists");
+  }
+
+  if (scholarNumber) {
+    const exists = await Student.findOne({ scholarNumber, schoolId: req.schoolId });
+    if (exists) throw new ValidationError("Scholar number already exists");
   }
   
   // Check if parent exists - MULTI-TENANT
@@ -276,7 +306,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     nextStudentNumber = lastNumber + 1;
   }
   
-  const studentID = `STU${year}${nextStudentNumber.toString().padStart(4, '0')}`;
+  let studentID = `STU${year}${nextStudentNumber.toString().padStart(4, '0')}`;
   
   // Double check this studentID doesn't exist in THIS SCHOOL
   const existingStudentID = await Student.findOne({ 
@@ -317,12 +347,14 @@ if (dateOfBirth) {
     formattedDOB = parsedDate;
   }
 }
+
+
   
   // ✅ CREATE STUDENT WITH PROPER CLASS ASSIGNMENT - MULTI-TENANT
   const student = new Student({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name: studentName,
-    email: studentEmail || undefined,
+ email: studentEmail ? studentEmail.toLowerCase().trim() : undefined,
     mobileNumber: mobileNumber || undefined,
     password: studentHashedPassword,
     studentID,
@@ -346,10 +378,12 @@ if (dateOfBirth) {
     fatherPhone,
     fatherEmail,
     fatherOccupation,
+
     motherName,
     motherPhone,
     motherEmail,
     motherOccupation,
+
     guardianName,
     guardianPhone,
     guardianRelation,
@@ -379,7 +413,22 @@ if (dateOfBirth) {
     
     role: 'student',
     isActive: true,
-    admissionDate: new Date()
+    admissionDate: new Date().toISOString(),
+
+    enrollmentNumber: enrollmentNumber || undefined,
+  scholarNumber: scholarNumber || undefined,
+
+
+  isHandicapped: isHandicapped || false,
+
+  scholarship: (bankName && accountNumber && ifscCode) ? {
+    bankName,
+    accountNumber,
+    ifscCode,
+    accountHolderName,
+    scholarshipName,
+    ssid
+  } : undefined,
   });
   
   try {
@@ -399,7 +448,10 @@ if (dateOfBirth) {
   
   // Create or update parent - MULTI-TENANT
   if (isExistingParent) {
-    parent.children.push(student._id);
+    
+    if (!parent.children.includes(student._id)) {
+  parent.children.push(student._id);
+}
     try {
       await parent.save();
       console.log("✅ Added child to existing parent");
@@ -483,7 +535,13 @@ export const createStudent = asyncHandler(async (req, res) => {
     name, email, password, dateOfBirth, gender, bloodGroup,
     fatherName, fatherPhone, fatherEmail,
     motherName, motherPhone, motherEmail,
-    address, className, section, academicYear, rollNumber, admissionDate
+    address, className, section, academicYear, rollNumber, admissionDate,
+
+     // ✅ NEW
+  enrollmentNumber,
+  scholarNumber,
+  
+  isHandicapped
   } = req.body;
 
   
@@ -515,13 +573,45 @@ if (req.file) {
       throw new ValidationError('Email already exists');
     }
   }
+
+  // ✅ ENROLLMENT UNIQUE CHECK
+  if (enrollmentNumber) {
+    const exists = await Student.findOne({
+      enrollmentNumber,
+      schoolId: req.schoolId
+    });
+    if (exists) {
+      throw new ValidationError('Enrollment number already exists');
+    }
+  }
   
+
+    // ✅ SCHOLAR UNIQUE CHECK
+  if (scholarNumber) {
+    const exists = await Student.findOne({
+      scholarNumber,
+      schoolId: req.schoolId
+    });
+    if (exists) {
+      throw new ValidationError('Scholar number already exists');
+    }
+  }
+
   const year = new Date().getFullYear().toString().slice(-2);
   const count = await Student.countDocuments({ schoolId: req.schoolId });
   const studentID = `STU${year}${(count + 1).toString().padStart(4, '0')}`;
   
   const hashedPassword = password ? await bcrypt.hash(password, 10) : await bcrypt.hash('Student@0001', 10);
   
+
+  let formattedDOB;
+if (dateOfBirth) {
+  const parsed = new Date(dateOfBirth);
+  if (!isNaN(parsed.getTime())) {
+    formattedDOB = parsed;
+  }
+}
+
   const student = new Student({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name,
@@ -529,7 +619,7 @@ if (req.file) {
     email: email || undefined, // ✅ Fix: Empty email becomes undefined
     password: hashedPassword,
     studentID,
-    dateOfBirth,
+    dateOfBirth: formattedDOB,
     gender,
     bloodGroup,
     fatherName,
@@ -546,8 +636,16 @@ if (req.file) {
     rollNumber: rollNumber || count + 1,
     admissionDate: admissionDate || new Date(),
     status: section ? 'ENROLLED' : 'REGISTERED',
+
+     enrollmentNumber: enrollmentNumber || undefined,
+    scholarNumber: scholarNumber || undefined,
+
+      isHandicapped: isHandicapped || false,
+
     role: 'student',
-    isActive: true
+    isActive: true,
+
+    
   });
   
   await student.save();
@@ -637,7 +735,7 @@ export const deleteStudent = asyncHandler(async (req, res) => {
 });
 
 // Bulk upload students - MULTI-TENANT
-export const bulkUploadStudents = asyncHandler(async (req, res) => {
+export const bulkUploadStudent = asyncHandler(async (req, res) => {
   const { students } = req.body;
   
   if (!students || !Array.isArray(students) || students.length === 0) {
@@ -652,8 +750,15 @@ export const bulkUploadStudents = asyncHandler(async (req, res) => {
   for (const studentData of students) {
     try {
       const year = new Date().getFullYear().toString().slice(-2);
-      const count = await Student.countDocuments({ schoolId: req.schoolId });
-      const studentID = `STU${year}${(count + 1).toString().padStart(4, '0')}`;
+     const lastStudent = await Student.findOne({ schoolId: req.schoolId }).sort({ studentID: -1 });
+
+let next = 1;
+if (lastStudent && lastStudent.studentID) {
+  next = parseInt(lastStudent.studentID.slice(-4)) + 1;
+}
+
+const studentID = `STU${year}${next.toString().padStart(4, '0')}`;
+    
       
       const hashedPassword = await bcrypt.hash('Student@0001', 10);
       
@@ -746,7 +851,7 @@ export default {
   createStudentWithParent,
   updateStudent,
   deleteStudent,
-  bulkUploadStudents,
+  bulkUploadStudent,
   updateStudentStatus,
   promoteStudents
 };

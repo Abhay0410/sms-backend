@@ -1092,7 +1092,6 @@ export const getClassStudents = asyncHandler(async (req, res) => {
   const classData = await Class.findOne({
     _id: classId,
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
-    academicYear: academicYear || getCurrentAcademicYear(),
   }).lean();
 
   if (!classData) {

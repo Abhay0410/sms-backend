@@ -12,7 +12,7 @@ import {
   updateStudentStatus,
   promoteStudents
 } from "../../controllers/admin/admin.student.controller.js";
-import upload from "../../middleware/multer.js";
+import { upload } from "../../middleware/upload.js";
 
 const router = Router();
 

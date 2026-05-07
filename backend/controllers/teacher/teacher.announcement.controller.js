@@ -5,12 +5,7 @@ import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 // Get all announcements visible to teacher - MULTI-TENANT
 export const getAllAnnouncements = asyncHandler(async (req, res) => {
@@ -167,7 +162,7 @@ export const createAnnouncement = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
+        fileUrl: file.path,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -222,21 +217,12 @@ export const deleteAnnouncement = asyncHandler(async (req, res) => {
     throw new ForbiddenError('You can only delete your own announcements');
   }
   
-  // Delete attachments from filesystem
+  // Delete attachments from Cloudinary
   if (announcement.attachments && announcement.attachments.length > 0) {
-    for (const attachment of announcement.attachments) {
-      if (attachment.publicId) {
-        const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
-        if (fs.existsSync(filePath)) {
-          try {
-            fs.unlinkSync(filePath);
-            console.log(`🗑️ Deleted file: ${attachment.publicId}`);
-          } catch (err) {
-            console.error(`❌ Error deleting file: ${attachment.publicId}`, err);
-          }
-        }
-      }
-    }
+    const deletePromises = announcement.attachments.map(attachment => {
+      if (attachment.publicId) return deleteFromCloudinary(attachment.publicId);
+    });
+    await Promise.all(deletePromises);
   }
   
   await announcement.deleteOne();
@@ -271,16 +257,7 @@ export const deleteAttachment = asyncHandler(async (req, res) => {
   }
   
   if (attachment.publicId) {
-    const filePath = path.join(__dirname, '../../uploads', req.schoolId.toString(), 'announcements', attachment.publicId);
-    
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        console.log(`🗑️ Deleted file: ${attachment.publicId}`);
-      } catch (err) {
-        console.error(`❌ Error deleting file: ${attachment.publicId}`, err);
-      }
-    }
+    await deleteFromCloudinary(attachment.publicId);
   }
   
   announcement.attachments.pull(attachmentId);
@@ -327,7 +304,7 @@ export const updateAnnouncement = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/${req.schoolId}/announcements/${file.filename}`,
+        fileUrl: file.path,
         publicId: file.filename,
         fileType,
         fileSize: file.size

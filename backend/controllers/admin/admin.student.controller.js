@@ -2,11 +2,15 @@
 import Student from '../../models/Student.js';
 import Parent from '../../models/Parent.js';
 import Class from '../../models/Class.js';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
+import { generateSecurePassword } from '../../utils/password.js';
+import logger from '../../utils/logger.js';
+import { deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 // ✅ HELPER FUNCTION: Find class by name or numeric value (MULTI-TENANT)
 async function findClassByName(className, academicYear, schoolId) {
@@ -78,12 +82,7 @@ export const getAllStudents = asyncHandler(async (req, res) => {
   if (status) filter.status = status;
   
   if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { studentID: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { fatherName: { $regex: search, $options: 'i' } }
-    ];
+    filter.$text = { $search: search };
   }
   
   const [students, total] = await Promise.all([
@@ -92,7 +91,8 @@ export const getAllStudents = asyncHandler(async (req, res) => {
       .select('-password')
       .sort({ rollNumber: 1 })
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Student.countDocuments(filter)
   ]);
   
@@ -108,7 +108,8 @@ export const getStudentById = asyncHandler(async (req, res) => {
     schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
   })
     .populate('class', 'className sections')
-    .select('-password');
+    .select('-password')
+    .lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -188,7 +189,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     const existingStudent = await Student.findOne({ 
       email: studentEmail,
       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
-    });
+    }).lean();
     if (existingStudent) {
       throw new ValidationError(`Student email ${studentEmail} is already registered`);
     }
@@ -199,7 +200,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     const existingAadhar = await Student.findOne({ 
       aadharNumber,
       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
-    });
+    }).lean();
     if (existingAadhar) {
       throw new ValidationError(`Aadhar number ${aadharNumber} is already registered`);
     }
@@ -215,7 +216,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   let parentID;
   
   if (parent) {
-    console.log("✅ Found existing parent:", parent.parentID);
+    logger.debug("Found existing parent", { parentID: parent.parentID });
     isExistingParent = true;
     parentID = parent.parentID;
     // ⚠️ RELAXED CHECK: If email matches, we link to existing parent.
@@ -227,7 +228,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     // Find the highest parent ID for THIS SCHOOL
     const lastParent = await Parent.findOne({ 
       schoolId: req.schoolId 
-    }).sort({ parentID: -1 });
+    }).sort({ parentID: -1 }).lean();
     let nextNumber = 1;
     
     if (lastParent && lastParent.parentID) {
@@ -241,7 +242,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     const existingParentID = await Parent.findOne({ 
       parentID, 
       schoolId: req.schoolId 
-    });
+    }).lean();
     if (existingParentID) {
       // If exists, find next available
       let counter = nextNumber + 1;
@@ -250,7 +251,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
         const exists = await Parent.findOne({ 
           parentID: testID,
           schoolId: req.schoolId 
-        });
+        }).lean();
         if (!exists) {
           parentID = testID;
           break;
@@ -259,7 +260,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
       }
     }
     
-    console.log("🆕 Creating new parent with ID:", parentID);
+    logger.debug("Creating new parent with ID", { parentID });
   }
   
   // Generate unique student ID - MULTI-TENANT
@@ -268,7 +269,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   // Find the highest student ID for THIS SCHOOL
   const lastStudent = await Student.findOne({ 
     schoolId: req.schoolId 
-  }).sort({ studentID: -1 });
+  }).sort({ studentID: -1 }).lean();
   let nextStudentNumber = 1;
   
   if (lastStudent && lastStudent.studentID) {
@@ -276,13 +277,13 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     nextStudentNumber = lastNumber + 1;
   }
   
-  const studentID = `STU${year}${nextStudentNumber.toString().padStart(4, '0')}`;
+  let studentID = `STU${year}${nextStudentNumber.toString().padStart(4, '0')}`;
   
   // Double check this studentID doesn't exist in THIS SCHOOL
   const existingStudentID = await Student.findOne({ 
     studentID,
     schoolId: req.schoolId 
-  });
+  }).lean();
   if (existingStudentID) {
     // If exists, find next available
     let counter = nextStudentNumber + 1;
@@ -291,7 +292,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
       const exists = await Student.findOne({ 
         studentID: testID,
         schoolId: req.schoolId 
-      });
+      }).lean();
       if (!exists) {
         studentID = testID;
         break;
@@ -301,8 +302,8 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   }
   
   // Generate passwords
-  const studentPassword = `Student@${studentID.slice(-4)}`;
-  const parentPassword = `Parent@${parentID.slice(-4)}`;
+  const studentPassword = generateSecurePassword();
+  const parentPassword = generateSecurePassword();
   
   const studentHashedPassword = await bcrypt.hash(studentPassword, 10);
   const parentHashedPassword = await bcrypt.hash(parentPassword, 10);
@@ -381,68 +382,61 @@ if (dateOfBirth) {
     admissionDate: new Date()
   });
   
-  try {
-    await student.save();
-    console.log(`✅ Student created: ${studentID} → ${classDoc.className}`);
-  } catch (error) {
-    console.error("❌ Student creation failed:", error);
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern).find(k => k !== 'schoolId');
-      if (error.keyValue[field] === null) {
-         throw new ValidationError("A student without an email already exists. Please provide a unique email.");
-      }
-      throw new ValidationError(`${field} '${error.keyValue[field]}' already exists in this school.`);
-    }
-    throw error;
-  }
+  const session = await mongoose.startSession();
+  session.startTransaction();
   
-  // Create or update parent - MULTI-TENANT
-  if (isExistingParent) {
-    parent.children.push(student._id);
-    try {
-      await parent.save();
-      console.log("✅ Added child to existing parent");
-    } catch (error) {
-      console.error("❌ Parent update failed:", error);
-      await Student.findByIdAndDelete(student._id);
-      throw new ValidationError("Failed to update parent account");
-    }
-  } else {
-    parent = new Parent({
-      schoolId: req.schoolId,  // ✅ MULTI-TENANT
-      name: parentName,
-      email: parentEmail.toLowerCase().trim(),
-      password: parentHashedPassword,
-      parentID,
-      phone: parentPhone,
-      relation: parentRelation,
-      occupation: parentOccupation,
-      qualification: parentQualification,
-      income: parentIncome,
-      address: {
-        street,
-        city,
-        state,
-        pincode,
-        country: country || 'India'
-      },
-      children: [student._id],
-      role: 'parent',
-      isActive: true
-    });
+  try {
+    await student.save({ session });
+    logger.info(`Student created: ${studentID} -> ${classDoc.className}`);
     
-    try {
-      await parent.save();
-      console.log("✅ New parent created:", parentID);
-    } catch (error) {
-      console.error("❌ Parent creation failed:", error);
-      await Student.findByIdAndDelete(student._id);
-      if (error.code === 11000) {
-        const field = Object.keys(error.keyPattern)[0];
-        throw new ValidationError(`${field} already exists: ${error.keyValue[field]}`);
-      }
-      throw error;
+    // Create or update parent - MULTI-TENANT
+    if (isExistingParent) {
+      parent.children.push(student._id);
+      await parent.save({ session });
+      logger.debug("Added child to existing parent");
+    } else {
+      parent = new Parent({
+        schoolId: req.schoolId,  // ✅ MULTI-TENANT
+        name: parentName,
+        email: parentEmail.toLowerCase().trim(),
+        password: parentHashedPassword,
+        parentID,
+        phone: parentPhone,
+        relation: parentRelation,
+        occupation: parentOccupation,
+        qualification: parentQualification,
+        income: parentIncome,
+        address: {
+          street,
+          city,
+          state,
+          pincode,
+          country: country || 'India'
+        },
+        children: [student._id],
+        role: 'parent',
+        isActive: true
+      });
+      
+      await parent.save({ session });
+      logger.info(`New parent created: ${parentID}`);
     }
+    
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error("Transaction aborted. Student/Parent creation failed", { error: error.message });
+    
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern).find(k => k !== 'schoolId') || Object.keys(error.keyPattern)[0];
+      if (error.keyValue && error.keyValue[field] === null) {
+         throw new ValidationError("A record with this empty/null field already exists. Please provide a unique value.");
+      }
+      throw new ValidationError(`${field} '${error.keyValue ? error.keyValue[field] : ''}' already exists in this school.`);
+    }
+    throw new ValidationError(error.message || "Failed to complete registration");
+  } finally {
+    session.endSession();
   }
   
   // Response
@@ -489,9 +483,11 @@ export const createStudent = asyncHandler(async (req, res) => {
   
 
   // ✅ Handle profile picture
-let profilePicture = null;
+let profilePicture = '';
+let profilePicturePublicId = '';
 if (req.file) {
-  profilePicture = req.file.filename;  // only filename save
+  profilePicture = req.file.path;
+  profilePicturePublicId = req.file.filename;
 }
 
   if (!name || !fatherName || !className || !academicYear) {
@@ -509,7 +505,7 @@ if (req.file) {
     const existingStudent = await Student.findOne({ 
       email,
       schoolId: req.schoolId 
-    });
+    }).lean();
     if (existingStudent) {
       throw new ValidationError('Email already exists');
     }
@@ -519,12 +515,14 @@ if (req.file) {
   const count = await Student.countDocuments({ schoolId: req.schoolId });
   const studentID = `STU${year}${(count + 1).toString().padStart(4, '0')}`;
   
-  const hashedPassword = password ? await bcrypt.hash(password, 10) : await bcrypt.hash('Student@0001', 10);
+  const plainPassword = password || generateSecurePassword();
+  const hashedPassword = await bcrypt.hash(plainPassword, 10);
   
   const student = new Student({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     name,
     profilePicture,
+    profilePicturePublicId,
     email: email || undefined, // ✅ Fix: Empty email becomes undefined
     password: hashedPassword,
     studentID,
@@ -549,19 +547,35 @@ if (req.file) {
     isActive: true
   });
   
-  await student.save();
+  const session = await mongoose.startSession();
+  session.startTransaction();
   
-  // Update section strength if section provided - MULTI-TENANT
-  if (section) {
-    const sectionData = classDoc.sections.find(s => s.sectionName === section);
-    if (sectionData) {
-      sectionData.currentStrength += 1;
-      await classDoc.save();
+  try {
+    await student.save({ session });
+    
+    // Update section strength if section provided - MULTI-TENANT
+    if (section) {
+      const sectionData = classDoc.sections.find(s => s.sectionName === section);
+      if (sectionData) {
+        sectionData.currentStrength += 1;
+        await classDoc.save({ session });
+      }
     }
+    
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
   }
   
   const studentResponse = student.toObject();
   delete studentResponse.password;
+  studentResponse.credentials = {
+    studentID,
+    password: plainPassword
+  };
   
   return successResponse(res, 'Student created successfully', studentResponse, 201);
 });
@@ -578,7 +592,12 @@ export const updateStudent = asyncHandler(async (req, res) => {
   
  // ✅ Handle profile picture upload
   if (req.file) {
-    updateData.profilePicture = req.file.filename;
+    const existingStudent = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
+    if (existingStudent && existingStudent.profilePicturePublicId) {
+      await deleteFromCloudinary(existingStudent.profilePicturePublicId);
+    }
+    updateData.profilePicture = req.file.path;
+    updateData.profilePicturePublicId = req.file.filename;
   }
 
   const student = await Student.findOneAndUpdate(
@@ -588,7 +607,7 @@ export const updateStudent = asyncHandler(async (req, res) => {
     },
     updateData,
     { new: true, runValidators: true }
-  ).select('-password');
+  ).select('-password').lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -610,27 +629,46 @@ export const deleteStudent = asyncHandler(async (req, res) => {
     throw new NotFoundError('Student');
   }
   
-  const classData = await Class.findOne({ 
-    _id: student.class,
-    schoolId: req.schoolId 
-  });
-  if (classData) {
-    const sectionData = classData.sections.find(s => s.sectionName === student.section);
-    if (sectionData && sectionData.currentStrength > 0) {
-      sectionData.currentStrength -= 1;
-      await classData.save();
-    }
+  // Delete profile picture from Cloudinary on user deletion
+  if (student.profilePicturePublicId) {
+    await deleteFromCloudinary(student.profilePicturePublicId);
   }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
   
-  await Parent.updateMany(
-    { 
-      schoolId: req.schoolId,
-      children: studentId 
-    },
-    { $pull: { children: studentId } }
-  );
-  
-  await student.deleteOne();
+  try {
+    const classData = await Class.findOne({ 
+      _id: student.class,
+      schoolId: req.schoolId 
+    });
+    if (classData) {
+      const sectionData = classData.sections.find(s => s.sectionName === student.section);
+      if (sectionData && sectionData.currentStrength > 0) {
+        sectionData.currentStrength -= 1;
+        await classData.save({ session });
+      }
+    }
+    
+    await Parent.updateMany(
+      { 
+        schoolId: req.schoolId,
+        children: studentId 
+      },
+      { $pull: { children: studentId } },
+      { session }
+    );
+    
+    student.isDeleted = true;
+    student.deletedAt = new Date();
+    await student.save({ session });
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
   
   return successResponse(res, 'Student deleted successfully');
 });
@@ -654,7 +692,8 @@ export const bulkUploadStudents = asyncHandler(async (req, res) => {
       const count = await Student.countDocuments({ schoolId: req.schoolId });
       const studentID = `STU${year}${(count + 1).toString().padStart(4, '0')}`;
       
-      const hashedPassword = await bcrypt.hash('Student@0001', 10);
+      const tempPassword = generateSecurePassword();
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
       
       const student = new Student({
         schoolId: req.schoolId,  // ✅ MULTI-TENANT
@@ -694,7 +733,7 @@ export const updateStudentStatus = asyncHandler(async (req, res) => {
     },
     { status },
     { new: true }
-  ).select('-password');
+  ).select('-password').lean();
   
   if (!student) {
     throw new NotFoundError('Student');

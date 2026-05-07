@@ -4,6 +4,7 @@ import School from '../../models/School.js'; // Add this import
 import { asyncHandler } from '../../middleware/errorHandler.js'; // Add this
 import { successResponse } from '../../utils/response.js'; // Add this
 import { NotFoundError } from '../../utils/errors.js'; // Add this
+import { cacheMiddleware } from '../../utils/cache.js';
 import { 
   registerSchool, 
   getSchoolProfile,
@@ -14,11 +15,11 @@ const router = express.Router();
 
 // Existing routes
 router.post('/register', registerSchool);
-router.get('/profile', getSchoolProfile);
-router.get('/list', getAllSchools);
+router.get('/profile', cacheMiddleware(300), getSchoolProfile);
+router.get('/list', cacheMiddleware(300), getAllSchools);
 
 // ✅ NEW: Get school by slug
-router.get('/slug/:slug', asyncHandler(async (req, res) => {
+router.get('/slug/:slug', cacheMiddleware(300), asyncHandler(async (req, res) => {
   const { slug } = req.params;
   
   console.log("🔍 Looking for school with slug:", slug);
@@ -44,7 +45,7 @@ router.get('/slug/:slug', asyncHandler(async (req, res) => {
 }));
 
 // ✅ NEW: Active schools endpoint
-router.get('/active', asyncHandler(async (req, res) => {
+router.get('/active', cacheMiddleware(600), asyncHandler(async (req, res) => {
   const schools = await School.find({ isActive: true })
     .select('_id schoolName schoolCode address logo slug')
     .lean();

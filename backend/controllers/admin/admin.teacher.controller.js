@@ -6,7 +6,8 @@ import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
-import { uploadToCloudinary } from '../../utils/cloudinaryUpload.js';
+import { generateSecurePassword } from '../../utils/password.js';
+import { deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 
 // Get all teachers (FRONTEND COMPATIBLE) - MULTI-TENANT
@@ -20,11 +21,7 @@ export const getAllTeachers = asyncHandler(async (req, res) => {
   if (subject) filter.subjects = subject;
 
   if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { teacherID: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
-    ];
+    filter.$text = { $search: search };
   }
 
   const [teachers, total] = await Promise.all([
@@ -33,7 +30,8 @@ export const getAllTeachers = asyncHandler(async (req, res) => {
       .populate('assignedClasses.class', 'className')
       .sort({ teacherID: 1 })
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Teacher.countDocuments(filter)
   ]);
 
@@ -66,7 +64,7 @@ export const getAllTeachers = asyncHandler(async (req, res) => {
     });
 
     return {
-      ...teacher.toObject(),
+      ...teacher, // ✨ Removed .toObject() since we are using .lean() now
       assignments: {
         classTeacher,
         subjects
@@ -98,7 +96,8 @@ export const getTeacherById = asyncHandler(async (req, res) => {
     schoolId: req.schoolId  // ✅ MULTI-TENANT
   })
     .select('-password')
-    .populate('assignedClasses.class', 'className sections');
+    .populate('assignedClasses.class', 'className sections')
+    .lean();
   
   if (!teacher) {
     throw new NotFoundError('Teacher');
@@ -124,7 +123,7 @@ export const createTeacher = asyncHandler(async (req, res) => {
   const existingTeacher = await Teacher.findOne({ 
     email,
     schoolId: req.schoolId  // ✅ MULTI-TENANT
-  });
+  }).lean();
   if (existingTeacher) {
     throw new ValidationError('Email already exists');
   }
@@ -134,8 +133,8 @@ export const createTeacher = asyncHandler(async (req, res) => {
   const count = await Teacher.countDocuments({ schoolId: req.schoolId });
   const teacherID = `TCHR${year}${(count + 1).toString().padStart(4, '0')}`;
   
-  // ✅ Generate default password: Teacher@YYYY
-  const defaultPassword = `Teacher@${new Date().getFullYear()}`;
+  // ✅ Generate default secure password
+  const defaultPassword = generateSecurePassword();
   const hashedPassword = password ? 
     await bcrypt.hash(password, 10) : 
     await bcrypt.hash(defaultPassword, 10);
@@ -145,13 +144,8 @@ let profilePicture = '';
 let profilePicturePublicId = '';
 
 if (req.file) {
-  const cloudRes = await uploadToCloudinary(
-    req.file.path,
-    'sms/teachers'
-  );
-
-  profilePicture = cloudRes.url;
-  profilePicturePublicId = cloudRes.publicId;
+  profilePicture = req.file.path;
+  profilePicturePublicId = req.file.filename;
 }
 
   
@@ -208,15 +202,16 @@ export const updateTeacher = asyncHandler(async (req, res) => {
   delete updateData.role;
   delete updateData.schoolId;  // Prevent school change
 
-  // 🖼️ PROFILE PICTURE UPDATE (🔥 MISSING PART)
+  // 🖼️ PROFILE PICTURE UPDATE
   if (req.file) {
-    const cloud = await uploadToCloudinary(
-      req.file.path,
-      'sms/teachers'
-    );
+    // Delete old profile picture from Cloudinary if it exists
+    const existingTeacher = await Teacher.findOne({ _id: teacherId, schoolId: req.schoolId });
+    if (existingTeacher && existingTeacher.profilePicturePublicId) {
+      await deleteFromCloudinary(existingTeacher.profilePicturePublicId);
+    }
 
-    updateData.profilePicture = cloud.url;
-    updateData.profilePicturePublicId = cloud.publicId;
+    updateData.profilePicture = req.file.path;
+    updateData.profilePicturePublicId = req.file.filename;
   }
   
   const teacher = await Teacher.findOneAndUpdate(
@@ -226,7 +221,7 @@ export const updateTeacher = asyncHandler(async (req, res) => {
     },
     updateData,
     { new: true, runValidators: true }
-  ).select('-password');
+  ).select('-password').lean();
   
   if (!teacher) {
     throw new NotFoundError('Teacher');
@@ -253,7 +248,9 @@ export const deleteTeacher = asyncHandler(async (req, res) => {
     throw new ValidationError('Cannot delete teacher with active class assignments. Please remove class assignments first.');
   }
   
-  await teacher.deleteOne();
+  teacher.isDeleted = true;
+  teacher.deletedAt = new Date();
+  await teacher.save();
   
   return successResponse(res, 'Teacher deleted successfully');
 });
@@ -376,7 +373,7 @@ export const updateTeacherStatus = asyncHandler(async (req, res) => {
     },
     { status, isActive: status === 'ACTIVE' },
     { new: true }
-  ).select('-password');
+  ).select('-password').lean();
   
   if (!teacher) {
     throw new NotFoundError('Teacher');

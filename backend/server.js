@@ -8,7 +8,11 @@ import { fileURLToPath } from "url";
 import compression from "compression";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import mongoSanitize from "express-mongo-sanitize";
 import Session from "./models/Session.js";
+import logger from "./utils/logger.js";
+import { auditLogger } from "./middleware/auditLog.js";
+import { swaggerDocs } from "./utils/swagger.js";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -62,9 +66,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
-console.log("✅ Environment variables loaded:");
-console.log("  JWT_SECRET exists:", !!process.env.JWT_SECRET);
-console.log("  MONGODB_URI exists:", !!process.env.MONGODB_URI);
+logger.info("Environment variables loaded", {
+  JWT_SECRET_EXISTS: !!process.env.JWT_SECRET,
+  MONGODB_URI_EXISTS: !!process.env.MONGODB_URI
+});
 const app = express();
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -99,34 +104,29 @@ app.use(cors({
 app.use(express.json({ limit: isProd ? '10kb' : '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: isProd ? '10kb' : '10mb' }));
 
-// ✅ SAFE BODY-ONLY SANITIZER (Replaces express-mongo-sanitize & xss-clean)
-// This prevents the "Cannot set property query" error by ignoring req.query entirely
+// Data sanitization against NoSQL query injection (Express 5 Safe)
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object') {
-    const sanitizeValue = (val) => {
-      if (typeof val !== 'string') return val;
-      // 1. Basic NoSQL protection (remove $ and .)
-      let sanitized = val.replace(/\$|\./g, '');
-      // 2. Basic XSS protection (remove script tags and onEvent handlers)
-      sanitized = sanitized
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/on\w+=/gi, '');
-      return sanitized;
-    };
+  if (req.body) mongoSanitize.sanitize(req.body);
+  if (req.params) mongoSanitize.sanitize(req.params);
+  if (req.query) mongoSanitize.sanitize(req.query);
+  next();
+});
 
-    const walk = (obj) => {
-      for (let key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-          if (typeof obj[key] === 'object' && obj[key] !== null) {
-            walk(obj[key]);
-          } else {
-            obj[key] = sanitizeValue(obj[key]);
-          }
-        }
-      }
-    };
-    walk(req.body);
+// Data sanitization against XSS (Express 5 Safe)
+const cleanXSS = (obj) => {
+  if (!obj) return;
+  for (const key in obj) {
+    if (typeof obj[key] === 'string') {
+      obj[key] = obj[key].replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+      cleanXSS(obj[key]);
+    }
   }
+};
+app.use((req, res, next) => {
+  if (req.body) cleanXSS(req.body);
+  if (req.query) cleanXSS(req.query);
+  if (req.params) cleanXSS(req.params);
   next();
 });
 
@@ -135,6 +135,9 @@ app.use(morgan(isProd ? 'combined' : 'dev'));
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
+
+// Initialize Audit Logging for state-changing requests globally
+app.use(auditLogger);
 
 // ========================================
 // DATABASE & ROUTES
@@ -160,7 +163,7 @@ const autoCreateSession = async () => {
     isActive: true,
   });
 
-  console.log(`✅ Auto session created: ${startYear}-${endYear}`);
+  logger.info(`Auto session created: ${startYear}-${endYear}`);
 } else {
   // 👉 ensure active
   if (!exists.isActive) {
@@ -169,23 +172,22 @@ const autoCreateSession = async () => {
     exists.isActive = true;
     await exists.save();
 
-    console.log(`✅ Session activated: ${startYear}-${endYear}`);
+    logger.info(`Session activated: ${startYear}-${endYear}`);
   } else {
-    console.log("ℹ️ Session already active");
+    logger.debug("Session already active");
   }
 }
   } catch (error) {
-    console.error("❌ Auto session error:", error.message);
+    logger.error("Auto session error", { error: error.message });
   }
 };
 
 async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
-    console.log("✅ MongoDB Connected");
-    console.log("Connected DB:", mongoose.connection.name);
+    logger.info("MongoDB Connected", { db: mongoose.connection.name });
   } catch (err) {
-    console.error("❌ DB Error:", err.message);
+    logger.error("DB Error", { error: err.message });
     if (isProd) setTimeout(connectDB, 5000);
     else process.exit(1);
   }
@@ -246,21 +248,14 @@ app.use("/api/admin/transport", adminTransportRoutes);
 app.use("/api/admin/expense", adminExpenseRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);
 
-if (isProd) {
-  const frontendPath = path.join(__dirname, "../frontend/dist");
-  app.use(express.static(frontendPath));
-  
-  app.get("/*splat", (req, res, next) => { 
-    // originalUrl check karna zyada safe hota hai
-    if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/health")) {
-      return next();
-    }
-    res.sendFile(path.resolve(frontendPath, "index.html"));
-  });
-}
-
 // Error handler humesha sabse niche hona chahiye
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server on port ${PORT} (${isProd ? 'PROD' : 'DEV'})`));
+swaggerDocs(app, PORT);
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, "0.0.0.0", () => logger.info(`🚀 Server on port ${PORT} (${isProd ? 'PROD' : 'DEV'})`));
+}
+
+export default app;

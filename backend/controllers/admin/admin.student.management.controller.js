@@ -414,10 +414,13 @@ export const bulkDeleteStudents = asyncHandler(async (req, res) => {
   }
   
   // Delete students
-  const result = await Student.deleteMany({ _id: { $in: studentIds }, schoolId: req.schoolId });
+  const result = await Student.updateMany(
+    { _id: { $in: studentIds }, schoolId: req.schoolId },
+    { $set: { isDeleted: true, deletedAt: new Date() } }
+  );
   
-  return successResponse(res, `Successfully deleted ${result.deletedCount} students`, {
-    deletedCount: result.deletedCount
+  return successResponse(res, `Successfully deleted ${result.modifiedCount} students`, {
+    deletedCount: result.modifiedCount
   });
 });
 

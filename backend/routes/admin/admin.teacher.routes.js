@@ -1,7 +1,7 @@
 // routes/admin/admin.teacher.routes.js
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
-import upload from "../../middleware/multer.js";
+import { upload } from "../../middleware/upload.js";
 import {
   createTeacher,
   getTeachers,

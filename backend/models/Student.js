@@ -104,6 +104,9 @@ const studentSchema = new mongoose.Schema({
   
   role: { type: String, default: 'student' },
   isActive: { type: Boolean, default: true },
+  requiresPasswordChange: { type: Boolean, default: true },
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 studentSchema.plugin(mongoosePaginate);
@@ -119,5 +122,27 @@ studentSchema.index(
 );
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 studentSchema.index({ schoolId: 1, academicYear: 1, status: 1 });
+
+// ✅ TEXT INDEX FOR SEARCH OPTIMIZATION
+studentSchema.index(
+  { name: 'text', email: 'text', studentID: 'text', fatherName: 'text' },
+  { 
+    weights: { studentID: 3, name: 2, fatherName: 1, email: 1 } 
+  }
+);
+
+// ✅ SOFT DELETE MIDDLEWARE
+studentSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+studentSchema.pre('countDocuments', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+studentSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 export default mongoose.model('Student', studentSchema);

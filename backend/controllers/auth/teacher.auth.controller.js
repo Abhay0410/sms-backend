@@ -5,6 +5,7 @@ import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { ValidationError, AuthenticationError, NotFoundError } from "../../utils/errors.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
+import { deleteFromCloudinary } from "../../utils/cloudinary.js";
 
 function safeTeacher(teacher) {
   if (!teacher) return null;
@@ -125,6 +126,13 @@ export const profile = asyncHandler(async (req, res) => {
 
 // PUT /api/auth/teacher/profile - MULTI-TENANT
 export const updateProfile = asyncHandler(async (req, res) => {
+  // ✅ Fetch existing teacher to clean up old image
+  const teacher = await Teacher.findOne({
+    _id: req.user.id,
+    schoolId: req.schoolId
+  });
+  if (!teacher) throw new NotFoundError("Teacher not found in this institution");
+
   const allowedFields = ["name", "phone", "address", "gender", "dateOfBirth", "department", "subjects"];
   const updates = {};
 
@@ -140,6 +148,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
   }
 
   if (req.file) {
+    if (teacher.profilePicturePublicId) {
+      await deleteFromCloudinary(teacher.profilePicturePublicId);
+    }
     updates.profilePicture = req.file.path;
     updates.profilePicturePublicId = req.file.filename;
     console.log("✅ Profile picture uploaded:", req.file.path);

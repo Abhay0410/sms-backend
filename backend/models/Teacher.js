@@ -101,10 +101,35 @@ const teacherSchema = new mongoose.Schema({
   
   role: { type: String, default: 'teacher' },
   isActive: { type: Boolean, default: true },
+  requiresPasswordChange: { type: Boolean, default: true },
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null }
 }, { timestamps: true });
 
 teacherSchema.index({ schoolId: 1 });
 teacherSchema.index({ schoolId: 1, email: 1 }, { unique: true });
 teacherSchema.index({ schoolId: 1, teacherID: 1 }, { unique: true });
+
+// ✅ TEXT INDEX FOR SEARCH OPTIMIZATION
+teacherSchema.index(
+  { name: 'text', email: 'text', teacherID: 'text' },
+  { 
+    weights: { teacherID: 3, name: 2, email: 1 } 
+  }
+);
+
+// ✅ SOFT DELETE MIDDLEWARE
+teacherSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+teacherSchema.pre('countDocuments', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+teacherSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 export default mongoose.model('Teacher', teacherSchema);

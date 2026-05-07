@@ -1,41 +1,7 @@
 import multer from "multer";
 import path from "path";
-import { fileURLToPath } from "url";
-import fs from "fs";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
-import cloudinary from "../config/cloudinary.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Helper function to ensure school-specific directory exists
-const ensureSchoolDir = (schoolId, subFolder) => {
-  const rootDir = path.join(__dirname, "../uploads");
-  const schoolDir = path.join(rootDir, schoolId.toString());
-  const finalPath = path.join(schoolDir, subFolder);
-
-  if (!fs.existsSync(finalPath)) {
-    fs.mkdirSync(finalPath, { recursive: true });
-    console.log(`✅ Created tenant directory: ${finalPath}`);
-  }
-  return finalPath;
-};
-
-// Ensure base required uploads directories exist
-const createUploadDirs = () => {
-  const dirs = [
-    path.join(__dirname, "../uploads"),
-  ];
-
-  dirs.forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log(`✅ Created base directory: ${dir}`);
-    }
-  });
-};
-
-createUploadDirs();
+import cloudinary from "../utils/cloudinary.js";
 
 // ========================================
 // REUSABLE FILE FILTERS
@@ -62,46 +28,72 @@ const documentFilter = (req, file, cb) => {
 // STORAGE CONFIGURATIONS
 // ========================================
 
+// Generic folder generator based on school tenant
+const getCloudinaryFolder = (req, subFolder) => {
+  const schoolId = req.schoolId || "generic";
+  return `sms/${schoolId}/${subFolder}`;
+};
+
 // Profile Storage ✅ UPDATED FOR MULTI-TENANCY
 const profileStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: async (req, file) => {
-    const schoolId = req.schoolId || "generic";
+  params: async (req) => {
     const role = req.user?.role || "user";
     return {
-      folder: `sms/${schoolId}/${role}s`,
+      folder: getCloudinaryFolder(req, `${role}s_profiles`),
       public_id: `${role}-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
       allowed_formats: ["jpg", "jpeg", "png", "webp"],
     };
   },
 });
 
-// Message Attachments Storage ✅ UPDATED FOR MULTI-TENANCY
-const messageStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const schoolId = req.schoolId || "generic";
-    const uploadPath = ensureSchoolDir(schoolId, "messages");
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `msg-${uniqueSuffix}-${sanitizedName}`);
-  },
+// Message Attachments Storage (Supports Documents/PDFs) ✅ UPDATED FOR MULTI-TENANCY
+const messageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req) => {
+    return {
+      folder: getCloudinaryFolder(req, "messages"),
+      public_id: `msg-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "auto", 
+    };
+  }
 });
 
 // Announcement Storage ✅ UPDATED FOR MULTI-TENANCY
-const announcementStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const schoolId = req.schoolId || "generic";
-    const uploadPath = ensureSchoolDir(schoolId, "announcements");
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `announcement-${uniqueSuffix}-${sanitizedName}`);
-  },
+const announcementStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req) => {
+    return {
+      folder: getCloudinaryFolder(req, "announcements"),
+      public_id: `announcement-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "auto",
+    };
+  }
+});
+
+// Document Storage
+const documentStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req) => {
+    return {
+      folder: getCloudinaryFolder(req, "documents"),
+      public_id: `doc-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "auto",
+    };
+  }
+});
+
+// Result PDF Storage
+const resultStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req) => {
+    return {
+      folder: getCloudinaryFolder(req, "results"),
+      public_id: `result-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+      resource_type: "auto",
+      allowed_formats: ["pdf"],
+    };
+  }
 });
 
 // ========================================
@@ -127,30 +119,13 @@ export const uploadMessageAttachments = multer({
 });
 
 export const uploadDocuments = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      const schoolId = req.schoolId || "generic";
-      const uploadPath = ensureSchoolDir(schoolId, "documents");
-      cb(null, uploadPath);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, `doc-${uniqueSuffix}${path.extname(file.originalname)}`);
-    },
-  }),
+  storage: documentStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: documentFilter,
 });
 
 export const uploadResultPDF = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      const schoolId = req.schoolId || "generic";
-      const uploadPath = ensureSchoolDir(schoolId, "results");
-      cb(null, uploadPath);
-    },
-    filename: (req, file, cb) => cb(null, `result-${Date.now()}.pdf`),
-  }),
+  storage: resultStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf') cb(null, true);

@@ -17,7 +17,8 @@ export const getResultById = asyncHandler(async (req, res) => {
   .populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth')
   .populate('preparedBy', 'name teacherID')
   .populate('approvedBy', 'name')
-  .populate('class', 'className');
+  .populate('class', 'className')
+  .lean();
 
   // If result is null, it means the ID is wrong OR it belongs to another school
   if (!result) {
@@ -52,7 +53,8 @@ export const getAllResults = asyncHandler(async (req, res) => {
       .populate('preparedBy', 'name teacherID')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Result.countDocuments(filter)
   ]);
 
@@ -251,7 +253,7 @@ export const downloadResult = asyncHandler(async (req, res) => {
   const result = await Result.findOne({
     _id: resultId,
     schoolId: req.schoolId  // ✅ MULTI-TENANT
-  }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth');
+  }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth').lean();
   
   if (!result) throw new NotFoundError('Result');
   

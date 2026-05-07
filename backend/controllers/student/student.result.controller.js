@@ -23,7 +23,7 @@ export const getMyResults = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -41,7 +41,8 @@ export const getMyResults = asyncHandler(async (req, res) => {
   const results = await Result.find(filter)
     .populate('preparedBy', 'name teacherID')
     .populate('approvedBy', 'name adminID')
-    .sort({ examYear: -1, createdAt: -1 });
+    .sort({ examYear: -1, createdAt: -1 })
+    .lean();
   
   return successResponse(res, 'Results retrieved successfully', {
     results,
@@ -58,7 +59,7 @@ export const getResultById = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -71,7 +72,8 @@ export const getResultById = asyncHandler(async (req, res) => {
     isPublished: true
   })
     .populate('preparedBy', 'name teacherID')
-    .populate('approvedBy', 'name adminID');
+    .populate('approvedBy', 'name adminID')
+    .lean();
   
   if (!result) {
     throw new NotFoundError('Result not found or not yet published');
@@ -89,7 +91,7 @@ export const viewResult = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -103,7 +105,8 @@ export const viewResult = asyncHandler(async (req, res) => {
   })
     .populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth')
     .populate('preparedBy', 'name teacherID')
-    .populate('approvedBy', 'name adminID');
+    .populate('approvedBy', 'name adminID')
+    .lean();
   
   if (!result) {
     throw new NotFoundError('Result not found or not yet published');
@@ -126,7 +129,7 @@ export const downloadResult = asyncHandler(async (req, res) => {
       _id: resultId,
       student: studentId,
       isPublished: true
-    }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth')
+    }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth').lean()
   ]);
 
   if (!student || !result) {
@@ -290,7 +293,7 @@ export const getMyResultStatistics = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -301,7 +304,7 @@ export const getMyResultStatistics = asyncHandler(async (req, res) => {
     student: studentId,
     academicYear,
     isPublished: true
-  });
+  }).lean();
   
   const stats = {
     totalExams: results.length,
@@ -389,7 +392,7 @@ export const getRecentResults = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -402,7 +405,8 @@ export const getRecentResults = asyncHandler(async (req, res) => {
   })
     .sort({ createdAt: -1 })
     .limit(parseInt(limit))
-    .select('examType examYear academicYear overallPercentage overallGrade result createdAt');
+    .select('examType examYear academicYear overallPercentage overallGrade result createdAt')
+    .lean();
   
   return successResponse(res, 'Recent results retrieved successfully', {
     results,
@@ -418,7 +422,7 @@ export const compareResults = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -434,7 +438,8 @@ export const compareResults = asyncHandler(async (req, res) => {
   
   const results = await Result.find(filter)
     .select('examType examYear academicYear overallPercentage overallGrade result subjects')
-    .sort({ examYear: 1 });
+    .sort({ examYear: 1 })
+    .lean();
   
   if (results.length < 2) {
     return successResponse(res, 'Insufficient results for comparison', {
@@ -496,7 +501,7 @@ export const getPerformanceAnalysis = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId
-  });
+  }).lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -508,7 +513,8 @@ export const getPerformanceAnalysis = asyncHandler(async (req, res) => {
     isPublished: true
   })
     .select('examType examYear academicYear overallPercentage overallGrade result subjects')
-    .sort({ examYear: 1 });
+    .sort({ examYear: 1 })
+    .lean();
   
   if (results.length === 0) {
     return successResponse(res, 'No results available for analysis', {

@@ -3,64 +3,49 @@ import jwt from "jsonwebtoken";
 import { AuthenticationError } from "../utils/errors.js";
 // ✅ Import the getter function from your central utility
 import { getJWTConfig } from "../utils/jwt.js";
+import logger from "../utils/logger.js";
 
 export const requireAuth = (allowedRoles = []) => {
   return async (req, res, next) => {
     try {
-      console.log("\n🔐 Auth Middleware (Multi-Tenant):");
-      console.log("  Path:", req.path);
-      console.log("  Method:", req.method);
-      console.log("  Allowed roles:", allowedRoles.length > 0 ? allowedRoles : "Any authenticated role");
+      logger.debug("Auth Middleware (Multi-Tenant)", {
+        path: req.path,
+        method: req.method,
+        allowedRoles: allowedRoles.length > 0 ? allowedRoles : "Any authenticated role"
+      });
 
       const authHeader = req.headers.authorization;
       const cookieToken = req.cookies?.studentToken || req.cookies?.adminToken || req.cookies?.teacherToken || req.cookies?.parentToken;
-      // ✨ ADD THIS LINE: URL query se token nikalne ke liye
-      const queryToken = req.query.token; 
 
       let token = null;
 
       if (authHeader && authHeader.startsWith("Bearer ")) {
         token = authHeader.split(" ")[1];
-        console.log("  Auth header: Present (Bearer)");
+        logger.debug("Auth header: Present (Bearer)");
       } else if (cookieToken) {
         token = cookieToken;
-        console.log("  Using token from cookie");
-      } else if (queryToken) { // ✨ NEW CONDITION
-        token = queryToken;
-        console.log("  Using token from URL query");
+        logger.debug("Using token from cookie");
       } else {
-        console.log("  ❌ No Bearer token, cookie token, or query token found");
+        logger.debug("No Bearer token or cookie token found");
         throw new AuthenticationError("No token provided");
       }
 
       if (!token) {
-        console.log("  ❌ Token is empty");
         throw new AuthenticationError("No token provided");
       }
 
-      console.log("  Token length:", token.length);
-
       // ✅ Get JWT_SECRET using the getter function
       const { JWT_SECRET } = getJWTConfig();
-      console.log("  JWT_SECRET length:", JWT_SECRET.length);
 
       // ✅ Uses the imported JWT_SECRET (verified to exist)
       const decoded = jwt.verify(token, JWT_SECRET);
-      console.log("  ✅ Token decoded:", {
-        id: decoded.id,
-        schoolId: decoded.schoolId || 'N/A',
-        role: decoded.role,
-        isSuperAdmin: decoded.isSuperAdmin || false,
-        exp: new Date(decoded.exp * 1000).toISOString(),
-      });
 
       if (!decoded || !decoded.role) {
-        console.log("  ❌ Invalid token structure");
         throw new AuthenticationError("Invalid token");
       }
 
       if (allowedRoles.length > 0 && !allowedRoles.includes(decoded.role)) {
-        console.log("  ❌ Role not allowed:", decoded.role, "- Required:", allowedRoles);
+        logger.warn("Role not allowed", { userRole: decoded.role, required: allowedRoles });
         throw new AuthenticationError("Insufficient permissions");
       }
 
@@ -149,14 +134,13 @@ export const requireSuperAdmin = () => {
   return (req, res, next) => {
     requireAuth(['admin'])(req, res, () => {
       if (!req.user.isSuperAdmin) {
-        console.log("  ❌ Super admin access required but user is not super admin");
+        logger.warn("Super admin access required but user is not super admin", { userId: req.user.id });
         return res.status(403).json({
           success: false,
           message: "Super admin access required",
           error: "ACCESS_DENIED_SUPER_ADMIN"
         });
       }
-      console.log("  ✅ Super admin access granted");
       next();
     });
   };
@@ -223,14 +207,14 @@ export const ensureSchoolAccess = () => {
       
       // If user is super admin, allow access to all schools
       if (req.user.isSuperAdmin) {
-        console.log("  ⚡ Super admin bypassing school access check");
+        logger.debug("Super admin bypassing school access check");
         return next();
       }
       
       const requestedSchoolId = req.params.schoolId || req.body.schoolId;
       
       if (requestedSchoolId && requestedSchoolId !== req.user.schoolId) {
-        console.log("  ❌ School access denied:", {
+        logger.warn("School access denied", {
           userSchoolId: req.user.schoolId,
           requestedSchoolId: requestedSchoolId
         });
@@ -241,7 +225,6 @@ export const ensureSchoolAccess = () => {
         });
       }
       
-      console.log("  ✅ School access verified");
       next();
     } catch (error) {
       next(error);

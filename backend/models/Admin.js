@@ -54,10 +54,35 @@ const adminSchema = new mongoose.Schema({
 
   role: { type: String, default: 'admin' },
   isActive: { type: Boolean, default: true },
+  requiresPasswordChange: { type: Boolean, default: true },
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null }
 
 }, { timestamps: true });
 
 adminSchema.index({ schoolId: 1 });
 adminSchema.index({ schoolId: 1, email: 1 });
+
+// ✅ TEXT INDEX FOR SEARCH OPTIMIZATION
+adminSchema.index(
+  { name: 'text', email: 'text', adminID: 'text' },
+  { 
+    weights: { adminID: 3, name: 2, email: 1 } 
+  }
+);
+
+// ✅ SOFT DELETE MIDDLEWARE
+adminSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+adminSchema.pre('countDocuments', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+adminSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 export default mongoose.model('Admin', adminSchema);

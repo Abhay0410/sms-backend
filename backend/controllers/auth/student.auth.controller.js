@@ -5,6 +5,7 @@ import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
 import { AuthenticationError, ValidationError, NotFoundError } from "../../utils/errors.js";
+import { deleteFromCloudinary } from "../../utils/cloudinary.js";
 
 // Helper to remove sensitive data
 const safeStudent = (student) => {
@@ -25,6 +26,7 @@ const safeStudent = (student) => {
     nationality: obj.nationality,
     address: obj.address,
     profilePicture: obj.profilePicture,
+    profilePicturePublicId: obj.profilePicturePublicId,
     className: obj.className,
     section: obj.section,
     rollNumber: obj.rollNumber,
@@ -199,7 +201,12 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
   // Handle photo upload
   if (req.file) {
+    // Delete the old profile picture from Cloudinary if it exists
+    if (student.profilePicturePublicId) {
+      await deleteFromCloudinary(student.profilePicturePublicId);
+    }
     student.profilePicture = req.file.path;
+    student.profilePicturePublicId = req.file.filename;
     console.log("✅ Student profile picture uploaded:", req.file.path);
   }
 

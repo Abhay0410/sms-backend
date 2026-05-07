@@ -7,12 +7,7 @@ import Student from '../../models/Student.js';
 import ClassModel from '../../models/Class.js';
 import Teacher from '../../models/Teacher.js';
 import Parent from '../../models/Parent.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 // Helper: build participants array
 const buildParticipants = async ({
@@ -155,7 +150,7 @@ export const createThreadTeacher = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/${req.schoolId}/messages/${file.filename}`,
+        fileUrl: file.path,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -241,7 +236,7 @@ export const replyToThreadTeacher = asyncHandler(async (req, res) => {
       
       return {
         fileName: file.originalname,
-        fileUrl: `/uploads/${req.schoolId}/messages/${file.filename}`,
+        fileUrl: file.path,
         publicId: file.filename,
         fileType,
         fileSize: file.size
@@ -286,18 +281,10 @@ export const deleteMessage = asyncHandler(async (req, res) => {
 
   // Delete attachments
   if (message.attachments && message.attachments.length > 0) {
-    message.attachments.forEach(att => {
-      if (att.publicId) {
-        const filePath = path.join(__dirname, '../../uploads', schoolId.toString(), 'messages', att.publicId);
-        if (fs.existsSync(filePath)) {
-          try {
-            fs.unlinkSync(filePath);
-          } catch (e) {
-            console.error("Error deleting message attachment:", e);
-          }
-        }
-      }
+    const deletePromises = message.attachments.map(att => {
+      if (att.publicId) return deleteFromCloudinary(att.publicId);
     });
+    await Promise.all(deletePromises);
   }
 
   // Remove message

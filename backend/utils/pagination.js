@@ -2,7 +2,7 @@
 export const getPaginationParams = (req) => {
   // Create a clean copy of values, never modify req
   const page = parseInt(req?.query?.page) || 1;
-  const limit = parseInt(req?.query?.limit) || 20;
+  const limit = Math.min(parseInt(req?.query?.limit) || 20, 100); // 🚨 STRICT LIMIT: Prevent OOM crashes
   const skip = (page - 1) * limit;
 
   return { 

@@ -4,7 +4,10 @@ import Parent from "../../models/Parent.js";
 import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
-import { AuthenticationError, ValidationError, NotFoundError } from "../../utils/errors.js";
+import { AuthenticationError, NotFoundError } from "../../utils/errors.js";
+import logger from "../../utils/logger.js";
+import { parentLoginSchema, changePasswordSchema } from "../../middleware/auth.schemas.js";
+import { deleteFromCloudinary } from "../../utils/cloudinary.js";
 
 // Helper to remove sensitive data and include schoolId
 const safeParent = (parent) => {
@@ -26,6 +29,7 @@ const safeParent = (parent) => {
     children: obj.children,
     role: obj.role,
     schoolId: obj.schoolId,
+    requiresPasswordChange: obj.requiresPasswordChange || false,
     isActive: obj.isActive,
     lastLogin: obj.lastLogin,
     createdAt: obj.createdAt,
@@ -35,12 +39,8 @@ const safeParent = (parent) => {
 
 // LOGIN - include schoolId in token AND require schoolId in login query
 export const login = asyncHandler(async (req, res) => {
-  // ✅ FIX: Extract schoolId from request body - REQUIRED for tenant isolation
-  const { parentID, password, schoolId } = req.body || {};
-  
-  if (!parentID || !password || !schoolId) {
-    throw new ValidationError("parentID, password, and schoolId are required");
-  }
+  // ✅ Validated via Zod
+  const { parentID, password, schoolId } = parentLoginSchema.parse(req.body);
 
   // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
   const parent = await Parent.findOne({ 
@@ -76,10 +76,11 @@ export const login = asyncHandler(async (req, res) => {
   const token = signToken({ 
     id: parent._id.toString(), 
     role: "parent",
-    schoolId: parent.schoolId.toString() // Ensure string format
+    schoolId: parent.schoolId.toString(), // Ensure string format
+    requiresPasswordChange: parent.requiresPasswordChange || false
   });
 
-  console.log("🔐 Parent login successful:", {
+  logger.info("Parent login successful", {
     parentID: parent.parentID,
     schoolId: parent.schoolId,
     childrenCount: parent.children?.length || 0,
@@ -91,6 +92,7 @@ export const login = asyncHandler(async (req, res) => {
     token,
     role: "parent",
     schoolId: parent.schoolId,
+    requiresPasswordChange: parent.requiresPasswordChange || false,
     parent: safeParent(parent),
   });
 });
@@ -189,8 +191,12 @@ export const updateProfile = asyncHandler(async (req, res) => {
   });
 
   if (req.file) {
+    if (parent.profilePicturePublicId) {
+      await deleteFromCloudinary(parent.profilePicturePublicId);
+    }
     parent.profilePicture = req.file.path;
-    console.log("✅ Parent profile picture uploaded:", req.file.path);
+    parent.profilePicturePublicId = req.file.filename;
+    logger.debug("Parent profile picture uploaded", { path: req.file.path });
   }
 
   await parent.save();
@@ -202,15 +208,8 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
 // CHANGE PASSWORD - scoped by schoolId
 export const changePassword = asyncHandler(async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  
-  if (!currentPassword || !newPassword) {
-    throw new ValidationError("Current password and new password are required");
-  }
-
-  if (newPassword.length < 6) {
-    throw new ValidationError("New password must be at least 6 characters");
-  }
+  // ✅ Validated via Zod
+  const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
 
   const parent = await Parent.findOne({
     _id: req.user.id,
@@ -228,9 +227,11 @@ export const changePassword = asyncHandler(async (req, res) => {
   }
 
   parent.password = await bcrypt.hash(newPassword, 10);
+  parent.requiresPasswordChange = false; // ✅ Reset flag after change
+  
   await parent.save();
 
-  console.log("🔑 Password changed for parent:", {
+  logger.info("Password changed for parent", {
     parentID: parent.parentID,
     schoolId: parent.schoolId,
     timestamp: new Date().toISOString()
@@ -241,7 +242,7 @@ export const changePassword = asyncHandler(async (req, res) => {
 
 // LOGOUT
 export const logout = asyncHandler(async (req, res) => {
-  console.log("🔓 Parent logout:", {
+  logger.info("Parent logout", {
     parentId: req.user?.id,
     schoolId: req.schoolId,
     timestamp: new Date().toISOString()

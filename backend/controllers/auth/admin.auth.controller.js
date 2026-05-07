@@ -5,27 +5,26 @@ import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { ValidationError, AuthenticationError, NotFoundError } from "../../utils/errors.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
+import logger from "../../utils/logger.js";
+import { adminLoginSchema, changePasswordSchema } from "../../middleware/auth.schemas.js";
+import { deleteFromCloudinary } from "../../utils/cloudinary.js";
 
 function safeAdmin(admin) {
   if (!admin) return null;
   const {
     _id, adminID, name, email, phone, designation, address, gender, dateOfBirth, department,
-    role, profilePicture, isSuperAdmin, permissions, createdAt, updatedAt, schoolId
+    role, profilePicture, isSuperAdmin, permissions, createdAt, updatedAt, schoolId, requiresPasswordChange
   } = admin;
   return {
     id: _id, adminID, name, email, phone, designation, address, gender, dateOfBirth,
-    department, role, profilePicture, isSuperAdmin, permissions, schoolId, createdAt, updatedAt
+    department, role, profilePicture, isSuperAdmin, permissions, schoolId, requiresPasswordChange, createdAt, updatedAt
   };
 }
 
 // POST /api/auth/admin/login - MULTI-TENANT
 export const login = asyncHandler(async (req, res) => {
-  // ✅ FIX: Extract schoolId from request body - REQUIRED for tenant isolation
-  const { adminID, password, schoolId } = req.body || {};
-  
-  if (!adminID || !password || !schoolId) {
-    throw new ValidationError("adminID, password, and schoolId are required");
-  }
+  // ✅ Validated via Zod
+  const { adminID, password, schoolId } = adminLoginSchema.parse(req.body);
 
   // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
   const admin = await Admin.findOne({ 
@@ -61,10 +60,11 @@ export const login = asyncHandler(async (req, res) => {
     role: "admin", 
     designation: admin.designation, // ✅ Track specifically who they are
     schoolId: admin.schoolId.toString(), // Ensure string format
-    isSuperAdmin: admin.isSuperAdmin || false
+    isSuperAdmin: admin.isSuperAdmin || false,
+    requiresPasswordChange: admin.requiresPasswordChange || false
   });
 
-  console.log("🔐 Admin login successful:", {
+  logger.info("Admin login successful", {
     adminID: admin.adminID,
     schoolId: admin.schoolId,
     isSuperAdmin: admin.isSuperAdmin,
@@ -80,6 +80,7 @@ export const login = asyncHandler(async (req, res) => {
       role: "admin",
       designation: admin.designation, // ✅ Frontend isse tabs filter karega
       schoolId: admin.schoolId,
+      requiresPasswordChange: admin.requiresPasswordChange || false,
       admin: safeAdmin(admin),
     }
   );
@@ -123,6 +124,13 @@ export const profile = asyncHandler(async (req, res) => {
 
 // PUT /api/auth/admin/profile - MULTI-TENANT
 export const updateProfile = asyncHandler(async (req, res) => {
+  // ✅ MULTI-TENANT: Fetch existing admin first to check for old profile picture
+  const admin = await Admin.findOne({
+    _id: req.user.id,
+    schoolId: req.schoolId
+  });
+  if (!admin) throw new NotFoundError("Admin not found in this institution");
+
   const allowedFields = ["name", "phone", "designation", "address", "gender", "dateOfBirth", "department"];
   const updates = {};
 
@@ -133,9 +141,12 @@ export const updateProfile = asyncHandler(async (req, res) => {
   }
 
   if (req.file) {
+    if (admin.profilePicturePublicId) {
+      await deleteFromCloudinary(admin.profilePicturePublicId);
+    }
     updates.profilePicture = req.file.path;
     updates.profilePicturePublicId = req.file.filename;
-    console.log("✅ Profile picture uploaded:", req.file.path);
+    logger.debug("Profile picture uploaded", { path: req.file.path });
   }
 
   // ✅ MULTI-TENANT: Update only own school's admin
@@ -159,15 +170,8 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
 // PUT /api/auth/admin/change-password - MULTI-TENANT
 export const changePassword = asyncHandler(async (req, res) => {
-  const { currentPassword, newPassword } = req.body || {};
-  
-  if (!currentPassword || !newPassword) {
-    throw new ValidationError("Both current and new password are required");
-  }
-
-  if (newPassword.length < 6) {
-    throw new ValidationError("New password must be at least 6 characters long");
-  }
+  // ✅ Validated via Zod
+  const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
 
   // ✅ MULTI-TENANT: Verify admin belongs to same school
   const admin = await Admin.findOne({
@@ -186,9 +190,11 @@ export const changePassword = asyncHandler(async (req, res) => {
   }
 
   admin.password = await bcrypt.hash(newPassword, 10);
+  admin.requiresPasswordChange = false; // ✅ Reset flag after change
+  
   await admin.save();
 
-  console.log("🔑 Password changed for admin:", {
+  logger.info("Password changed for admin", {
     adminID: admin.adminID,
     schoolId: admin.schoolId,
     timestamp: new Date().toISOString()
@@ -200,7 +206,7 @@ export const changePassword = asyncHandler(async (req, res) => {
 // POST /api/auth/admin/logout
 export const logout = asyncHandler(async (req, res) => {
   // JWT is stateless, so logout is handled client-side
-  console.log("🔓 Admin logout:", {
+  logger.info("Admin logout", {
     adminId: req.user?.id,
     schoolId: req.schoolId,
     timestamp: new Date().toISOString()

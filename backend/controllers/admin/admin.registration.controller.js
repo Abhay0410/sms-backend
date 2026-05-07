@@ -1,12 +1,22 @@
 import bcrypt from "bcryptjs";
 import Admin from "../../models/Admin.js";
 import School from "../../models/School.js";
-import { uploadToCloudinary } from "../../utils/cloudinaryUpload.js";
 import { ValidationError, NotFoundError } from "../../utils/errors.js";
 import { HTTP_STATUS } from "../../constants/httpStatus.js";
+import { generateSecurePassword } from "../../utils/password.js";
+import { z } from "zod";
+import { deleteFromCloudinary } from "../../utils/cloudinary.js";
+
+const registerAdminSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email format"),
+  phone: z.string().min(1, "Phone is required"),
+  schoolId: z.string().min(1, "School ID is required")
+}).passthrough();
 
 export const registerAdmin = async (req, res) => {
   try {
+    const validatedData = registerAdminSchema.parse(req.body);
     const {
       name,
       email,
@@ -20,13 +30,7 @@ export const registerAdmin = async (req, res) => {
       dateOfBirth,
       joiningDate,
       address,
-    } = req.body;
-
-   
-
-    if (!name || !email || !phone || !schoolId) {
-      throw new ValidationError("Required fields missing");
-    }
+    } = validatedData;
 
     const school = await School.findById(schoolId);
     if (!school) throw new NotFoundError("School not found");
@@ -35,11 +39,7 @@ export const registerAdmin = async (req, res) => {
     if (existing) throw new ValidationError("Admin already exists");
 
     // 🔐 password
-    let passwordPlain;
-    if (designation === 'Librarian') passwordPlain = `Lib@${Math.floor(1000 + Math.random() * 9000)}`;
-    else if (designation === 'Accountant') passwordPlain = `Acc@${Math.floor(1000 + Math.random() * 9000)}`;
-    else passwordPlain = `Admin@${Math.floor(100 + Math.random() * 900)}`;
-
+    const passwordPlain = generateSecurePassword();
     const passwordHash = await bcrypt.hash(passwordPlain, 10);
 
     // 🆔 adminID
@@ -63,13 +63,8 @@ if (address) {
     let profilePicturePublicId = "";
 
     if (req.file) {
-      const cloudRes = await uploadToCloudinary(
-        req.file.path,
-        "sms/admins"
-      );
-
-      profilePicture = cloudRes.url;
-      profilePicturePublicId = cloudRes.publicId;
+      profilePicture = req.file.path;
+      profilePicturePublicId = req.file.filename;
     }
 
     const parsedDOB =
@@ -84,7 +79,7 @@ if (address) {
 
     const isSuperAdminParsed = req.body.isSuperAdmin === "true" || req.body.isSuperAdmin === true;
 
-    const admin = await Admin.create({
+    await Admin.create({
       name,
       email: email.toLowerCase(),
       phone,
@@ -163,13 +158,16 @@ parsedAddress = {
 
     // 4️⃣ Handle photo upload
     if (req.file) {
-      const cloud = await uploadToCloudinary(req.file.path, "sms/admins");
-      updateData.profilePicture = cloud.url;
-      updateData.profilePicturePublicId = cloud.publicId;
+      const existingAdmin = await Admin.findOne({ adminID: req.params.id });
+      if (existingAdmin && existingAdmin.profilePicturePublicId) {
+        await deleteFromCloudinary(existingAdmin.profilePicturePublicId);
+      }
+      updateData.profilePicture = req.file.path;
+      updateData.profilePicturePublicId = req.file.filename;
     }
 
     // 5️⃣ Update admin
-    const admin = await Admin.findOneAndUpdate({adminID:req.params.id}, updateData, { new: true });
+    const admin = await Admin.findOneAndUpdate({adminID: id}, updateData, { new: true });
     if (!admin) throw new NotFoundError("Admin not found");
 
     res.json({

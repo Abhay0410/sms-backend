@@ -22,7 +22,7 @@ export const getAllChildrenResults = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: parentId,
     schoolId: req.schoolId
-  }).populate('children', '_id studentID name className section');
+  }).populate('children', '_id studentID name className section').lean();
   
   if (!parent) {
     throw new NotFoundError('Parent');
@@ -37,7 +37,8 @@ export const getAllChildrenResults = asyncHandler(async (req, res) => {
   })
     .populate('student', 'name studentID className section')
     .populate('preparedBy', 'name teacherID')
-    .sort({ examYear: -1, createdAt: -1 });
+    .sort({ examYear: -1, createdAt: -1 })
+    .lean();
   
   return successResponse(res, 'All children results retrieved', {
     results,
@@ -58,7 +59,7 @@ export const getChildResults = asyncHandler(async (req, res) => {
     _id: parentId,
     schoolId: req.schoolId,
     children: childId  // MongoDB $in check
-  }).populate('children', 'name studentID className section');
+  }).populate('children', 'name studentID className section').lean();
   
   if (!parent) {
     console.log("❌ Access denied: Child not linked to parent");
@@ -79,7 +80,8 @@ export const getChildResults = asyncHandler(async (req, res) => {
   })
     .populate('preparedBy', 'name teacherID')
     .populate('approvedBy', 'name adminID')
-    .sort({ examYear: -1 });
+    .sort({ examYear: -1 })
+    .lean();
   
   return successResponse(res, 'Child results retrieved', {
     results,
@@ -105,7 +107,8 @@ export const getResultDetails = asyncHandler(async (req, res) => {
   })
     .populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth className section')
     .populate('preparedBy', 'name teacherID')
-    .populate('approvedBy', 'name adminID');
+    .populate('approvedBy', 'name adminID')
+    .lean();
   
   if (!result) {
     throw new NotFoundError('Result not found or not published');
@@ -126,7 +129,8 @@ export const viewResult = asyncHandler(async (req, res) => {
   })
     .populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth')
     .populate('preparedBy', 'name teacherID')
-    .populate('approvedBy', 'name adminID');
+    .populate('approvedBy', 'name adminID')
+    .lean();
   
   if (!result) {
     throw new NotFoundError('Result not found or not published');
@@ -145,7 +149,7 @@ export const downloadResult = asyncHandler(async (req, res) => {
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
     _id: resultId,
     isPublished: true
-  }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth');
+  }).populate('student', 'name studentID rollNumber fatherName motherName dateOfBirth').lean();
   
   if (!result) {
     throw new NotFoundError('Result not found or not published');
@@ -156,7 +160,7 @@ export const downloadResult = asyncHandler(async (req, res) => {
     _id: parentId,
     schoolId: req.schoolId,
     children: result.student._id
-  });
+  }).lean();
   
   if (!parent) {
     throw new ForbiddenError('Access denied');

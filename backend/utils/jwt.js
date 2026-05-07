@@ -1,43 +1,21 @@
-// utils/jwt.js - FIXED WITH LAZY LOADING
+// utils/jwt.js - SIMPLIFIED
 import jwt from "jsonwebtoken";
+import "../config/env.js"; // Strictly enforce env requirements early
+import logger from "./logger.js";
 
-let JWT_SECRET;
-let JWT_EXPIRES;
-let isInitialized = false;
-
-// Lazy initialization function
-function initialize() {
-  if (!isInitialized) {
-    JWT_SECRET = process.env.JWT_SECRET;
-    
-    // 🚨 CRITICAL: Force crash if secret is missing
-    if (!JWT_SECRET) {
-      console.error("❌ FATAL ERROR: JWT_SECRET is not defined in .env file.");
-      console.error("   Please add JWT_SECRET=your-super-secret-jwt-key-change-this-in-production to your .env file");
-      process.exit(1); 
-    }
-
-    JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
-    isInitialized = true;
-
-    console.log("🔐 JWT Utils Initialized (Secret Verified):");
-    console.log("  JWT_SECRET length:", JWT_SECRET.length);
-    console.log("  JWT_EXPIRES:", JWT_EXPIRES);
-  }
-}
+export const JWT_SECRET = process.env.JWT_SECRET;
+export const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
 
 /**
  * Sign a JWT token
  */
 export const signToken = (payload) => {
-  initialize(); // Initialize on first use
-  
   if (!payload.id || !payload.role || !payload.schoolId) {
-    console.error("❌ Missing required payload fields for JWT");
+    logger.error("Missing required payload fields for JWT", { payload });
     throw new Error("Invalid payload for JWT token");
   }
   
-  console.log("🔐 Signing token with payload:", {
+  logger.debug("Signing token with payload", {
     id: payload.id,
     role: payload.role,
     schoolId: payload.schoolId,
@@ -53,8 +31,6 @@ export const signToken = (payload) => {
  * Verify a JWT token
  */
 export const verifyToken = (token) => {
-  initialize(); // Initialize on first use
-  
   try {
     if (!token) {
       throw new Error("No token provided");
@@ -67,16 +43,9 @@ export const verifyToken = (token) => {
       throw new Error("Invalid token structure");
     }
     
-    console.log("✅ Token verified successfully:", {
-      id: decoded.id,
-      role: decoded.role,
-      schoolId: decoded.schoolId,
-      expires: new Date(decoded.exp * 1000).toISOString()
-    });
-    
     return decoded;
   } catch (error) {
-    console.error("❌ Token verification failed:", error.message);
+    logger.error("Token verification failed", { error: error.message });
     
     if (error.name === "TokenExpiredError") {
       throw new Error("Token expired");
@@ -115,12 +84,8 @@ export const isTokenExpiringSoon = (token) => {
 
 // Export getters for configuration
 export const getJWTConfig = () => {
-  initialize();
   return { JWT_SECRET, JWT_EXPIRES };
 };
-
-// Export constants (lazy loaded)
-export { JWT_SECRET, JWT_EXPIRES };
 
 export default {
   signToken,

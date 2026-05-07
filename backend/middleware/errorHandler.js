@@ -1,4 +1,5 @@
 import { AppError } from '../utils/errors.js';
+import logger from '../utils/logger.js';
 
 export const errorHandler = (err, req, res, next) => {
   // ✅ Handle null/undefined errors
@@ -10,7 +11,7 @@ export const errorHandler = (err, req, res, next) => {
     });
   }
 
-  console.error("DEBUG STACK:", err.stack)
+  logger.debug("DEBUG STACK", { stack: err.stack });
   
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Internal Server Error';
@@ -36,6 +37,16 @@ export const errorHandler = (err, req, res, next) => {
     errors = [{ field, message: `${field} already exists` }];
   }
 
+  // Zod Validation Error
+  if (err.name === 'ZodError') {
+    statusCode = 400;
+    message = 'Validation Error';
+    errors = err.errors.map(e => ({
+      field: e.path.join('.'),
+      message: e.message
+    }));
+  }
+
   // Mongoose CastError
   if (err.name === 'CastError') {
     statusCode = 400;
@@ -53,7 +64,7 @@ export const errorHandler = (err, req, res, next) => {
     message = 'Token expired';
   }
 
-  console.error('❌ Error:', {
+  logger.error('Error Occurred', {
     name: err.name,
     message: err.message,
     statusCode,

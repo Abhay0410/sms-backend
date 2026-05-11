@@ -417,4 +417,5 @@ export const getEnquiryAnalytics = asyncHandler(async (req, res) => {
     conversionRate: `${conversionRate}%`,
     financials: { totalMarketingExpense, customerAcquisitionCost: cac }
   });
+  
 });

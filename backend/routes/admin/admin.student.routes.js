@@ -8,7 +8,7 @@ import {
   createStudentWithParent, // ✅ Add this
   updateStudent,
   deleteStudent,
-  bulkUploadStudents,
+
   updateStudentStatus,
   promoteStudents
 } from "../../controllers/admin/admin.student.controller.js";
@@ -30,7 +30,7 @@ router.post("/with-parent", createStudentWithParent); // ✅ Full registration
 
 router.put("/:studentId",upload.single("profilePicture"), updateStudent);
 router.delete("/:studentId", deleteStudent);
-router.post("/bulk-upload", bulkUploadStudents);
+// router.post("/bulk-upload", bulkUploadStudents);
 router.put("/:studentId/status", updateStudentStatus);
 router.post("/promote", promoteStudents);
 

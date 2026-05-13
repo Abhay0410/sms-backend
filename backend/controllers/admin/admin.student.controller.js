@@ -118,6 +118,10 @@ export const getStudentById = asyncHandler(async (req, res) => {
   return successResponse(res, 'Student retrieved successfully', student);
 });
 
+const toBoolean = (value) => {
+  return value === true || value === "true";
+};
+
 // Create student with parent - MULTI-TENANT
 export const createStudentWithParent = asyncHandler(async (req, res) => {
   const {
@@ -404,11 +408,11 @@ if (dateOfBirth) {
       relation: emergencyContactRelation
     },
     
-    transportRequired: transportRequired || false,
+   transportRequired: toBoolean(transportRequired),
     busRoute,
     pickupPoint,
-    
-    hostelResident: hostelResident || false,
+    hostelResident: toBoolean(hostelResident),
+  
     hostelBlock,
     roomNumber,
     
@@ -420,7 +424,8 @@ if (dateOfBirth) {
   scholarNumber: scholarNumber || undefined,
 
 
-  isHandicapped: isHandicapped || false,
+  isHandicapped: toBoolean(isHandicapped),
+  
 
   scholarship: (bankName && accountNumber && ifscCode) ? {
     bankName,
@@ -635,7 +640,7 @@ if (dateOfBirth) {
      enrollmentNumber: enrollmentNumber || undefined,
     scholarNumber: scholarNumber || undefined,
 
-      isHandicapped: isHandicapped || false,
+     isHandicapped: toBoolean(isHandicapped),
 
     role: 'student',
     isActive: true,

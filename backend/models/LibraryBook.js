@@ -6,7 +6,12 @@ const libraryBookSchema = new mongoose.Schema({
   author: { type: String, required: true },
   isbn: { type: String }, 
   serialCode: { type: String, required: true }, // Unique code for every physical copy
-  category: { type: String, enum: ['ACADEMIC', 'FICTION', 'REFERENCE', 'OTHERS'], default: 'ACADEMIC' },
+ category: {
+  type: String,
+  required: true,
+  trim: true,
+  default: 'ACADEMIC'
+},
   subject: { type: String },
   rackNumber: { type: String }, // Physical location in library
   price: { type: Number },

@@ -128,16 +128,33 @@ export const createTeacher = asyncHandler(async (req, res) => {
     throw new ValidationError('Email already exists');
   }
   
-  // ✅ Generate teacher ID per SCHOOL - MULTI-TENANT
+  // ✅ ROBUST: Generate unique teacher ID per SCHOOL - MULTI-TENANT
   const year = new Date().getFullYear().toString().slice(-2);
-  const count = await Teacher.countDocuments({ schoolId: req.schoolId });
-  const teacherID = `TCHR${year}${(count + 1).toString().padStart(4, '0')}`;
+  const lastTeacher = await Teacher.findOne({ schoolId: req.schoolId })
+    .sort({ teacherID: -1 })
+    .lean();
+    
+  let nextTeacherNumber = 1;
+  if (lastTeacher && lastTeacher.teacherID) {
+    const match = lastTeacher.teacherID.match(/\d{4}$/);
+    if (match) {
+      nextTeacherNumber = parseInt(match[0]) + 1;
+    }
+  }
+  
+  let teacherID = `TCHR${year}${nextTeacherNumber.toString().padStart(4, '0')}`;
+  
+  // Double check to prevent any collisions if an ID was deleted manually
+  let idExists = await Teacher.findOne({ teacherID, schoolId: req.schoolId }).lean();
+  while (idExists) {
+    nextTeacherNumber++;
+    teacherID = `TCHR${year}${nextTeacherNumber.toString().padStart(4, '0')}`;
+    idExists = await Teacher.findOne({ teacherID, schoolId: req.schoolId }).lean();
+  }
   
   // ✅ Generate default secure password
-  const defaultPassword = generateSecurePassword();
-  const hashedPassword = password ? 
-    await bcrypt.hash(password, 10) : 
-    await bcrypt.hash(defaultPassword, 10);
+  const plainPassword = password || generateSecurePassword();
+  const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
     // 🖼️ PROFILE PICTURE UPLOAD (Admin jaisa)
 let profilePicture = '';
@@ -184,7 +201,7 @@ if (req.file) {
   // ✅ Include credentials in response
   teacherResponse.credentials = {
     teacherID: teacher.teacherID,
-    defaultPassword: password || defaultPassword,
+    password: plainPassword,
     note: 'Please share these credentials with the teacher and advise them to change the password after first login.'
   };
   

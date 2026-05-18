@@ -14,8 +14,8 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 // 1. FEE HEAD MANAGEMENT (Master Data)
 // ==========================================
 export const getStudentsWithFees = asyncHandler(async (req, res) => {
-  // ✅ 1. Destructure classId properly
-  const { academicYear, search, status, month, classId } = req.query;
+  // ✅ 1. Destructure query params properly including pagination
+  const { academicYear, search, status, month, classId, page = 1, limit = 7 } = req.query;
   const schoolId = req.schoolId;
 
   const statusFilter = status ? status.toUpperCase() : null;
@@ -35,18 +35,30 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     ];
   }
 
-  // ✅ 3. Fetch Students first
-  const students = await Student.find(filter).lean();
+  // ✅ 3. Fetch ALL matching Students first
+  const students = await Student.find(filter).select('-password').lean();
+  
+  // ✅ 4. Fetch ALL Fee Payments for these students in ONE single query (Fixes N+1 issue)
+  const studentIds = students.map(s => s._id);
+  const feePayments = await FeePayment.find({
+    student: { $in: studentIds },
+    academicYear,
+    schoolId
+  }).lean();
+
+  // Create a fast lookup map for fee records
+  const feeMap = new Map();
+  feePayments.forEach(fp => feeMap.set(fp.student.toString(), fp));
+
   const studentsWithFees = [];
   const monthPrefix = month && month !== "ALL" ? month.substring(0, 3).toUpperCase() : null;
 
+  let totalPendingStats = 0;
+  let totalPaidStats = 0;
+
   for (const student of students) {
-    // 🔍 Find Fee Record
-    const fp = await FeePayment.findOne({ 
-      student: student._id, 
-      academicYear, 
-      schoolId 
-    }).lean();
+    // 🔍 Find Fee Record instantly from memory map
+    const fp = feeMap.get(student._id.toString());
 
     // 🚩 IMPORTANT: Agar student register hai par fee set nahi hai, fir bhi list mein dikhao
     if (!fp) {
@@ -90,20 +102,36 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
     if (statusFilter === "PAID" && !isPaidInContext) continue;
     if ((statusFilter === "PENDING" || statusFilter === "UNPAID") && isPaidInContext) continue;
 
+        const pendingAmt = Math.max(0, dTotal - dPaid);
+        totalPendingStats += pendingAmt;
+        totalPaidStats += dPaid;
+
     studentsWithFees.push({
       ...student,
       feeDetails: {
         feePaymentId: fp._id,
         totalFee: dTotal,
         paidAmount: dPaid,
-        pendingAmount: Math.max(0, dTotal - dPaid),
+            pendingAmount: pendingAmt,
         status: isPaidInContext ? "PAID" : dStatus,
         installments: fp.installments
       }
     });
   }
   
-  return successResponse(res, "Fetched", { students: studentsWithFees });
+  // ✅ 5. Apply Pagination In-Memory before sending to frontend
+  const pageNum = parseInt(page, 10);
+  const limitNum = parseInt(limit, 10);
+  const startIndex = (pageNum - 1) * limitNum;
+  const endIndex = pageNum * limitNum;
+  
+  const paginatedStudents = studentsWithFees.slice(startIndex, endIndex);
+
+  return successResponse(res, "Fetched", { 
+    students: paginatedStudents,
+    pagination: { total: studentsWithFees.length, page: pageNum, limit: limitNum, pages: Math.ceil(studentsWithFees.length / limitNum) },
+    stats: { totalStudents: studentsWithFees.length, totalPending: totalPendingStats, totalPaid: totalPaidStats }
+  });
 });
 
 export const createFeeHead = asyncHandler(async (req, res) => {

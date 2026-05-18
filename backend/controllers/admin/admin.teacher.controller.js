@@ -114,6 +114,24 @@ export const createTeacher = asyncHandler(async (req, res) => {
     employmentType, salary, subjects, department,
     panNumber // ✅ Make sure it's extracted from req.body
   } = req.body;
+
+  let parsedAddress = {};
+
+if (address) {
+  parsedAddress =
+    typeof address === "string"
+      ? JSON.parse(address)
+      : address;
+}
+
+let parsedSubjects = [];
+
+if (subjects) {
+  parsedSubjects =
+    typeof subjects === "string"
+      ? JSON.parse(subjects)
+      : subjects;
+}
   
   if (!name || !email || !phone) {
     throw new ValidationError('Name, email, and phone are required');
@@ -179,14 +197,14 @@ if (req.file) {
     profilePicturePublicId,
     panNumber, // ✅ ADD THIS LINE - Iske bina save nahi hoga
     gender,
-    address,
+    address: parsedAddress,
     qualification,
     specialization,
     experience,
     joiningDate: joiningDate || new Date(),
     employeeType: employmentType || 'PERMANENT',  // Fixed field name
     salary,
-    subjects: subjects || [],
+    subjects: parsedSubjects || [],
     assignedClasses: [],
     role: 'teacher',
     status: 'ACTIVE',

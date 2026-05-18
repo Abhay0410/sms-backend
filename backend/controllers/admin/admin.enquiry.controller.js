@@ -192,60 +192,100 @@ export const convertEnquiryToStudent = asyncHandler(async (req, res) => {
   // --- ID GENERATION LOGIC ---
   const year = new Date().getFullYear().toString().slice(-2);
   
-  // Parent ID
-  const lastParent = await Parent.findOne({ schoolId }).sort({ parentID: -1 });
-  const nextParentNum = (lastParent && lastParent.parentID) ? parseInt(lastParent.parentID.slice(-4)) + 1 : 1;
-  const parentID = `PAR${year}${nextParentNum.toString().padStart(4, '0')}`;
-  
-  // Student ID
-  const lastStudent = await Student.findOne({ schoolId }).sort({ studentID: -1 });
-  const nextStudentNum = (lastStudent && lastStudent.studentID) ? parseInt(lastStudent.studentID.slice(-4)) + 1 : 1;
-  const studentID = `STU${year}${nextStudentNum.toString().padStart(4, '0')}`;
-
   const defaultPassword = await bcrypt.hash('Welcome@123', 10);
 
-  // 1. Create Parent
-  const parentEmail = enquiry.email || `p_${parentID}@school.com`; // Fallback if parent didn't provide email
-  const newParent = await Parent.create({
-    schoolId,
-    name: enquiry.parentName,
-    email: parentEmail.toLowerCase(),
-    password: defaultPassword,
-    parentID,
-    phone: enquiry.primaryPhone,
-    relation: 'Father', // Safe default fallback
-    occupation: enquiry.occupation,
-    address: { street: enquiry.address },
-    role: 'parent',
-    isActive: true,
-    children: []
-  });
+  // 1. Smart Parent Resolution
+  let parentEmail = enquiry.email ? enquiry.email.toLowerCase().trim() : null;
+  let parentDocToUse = null;
+  let parentIDStr = null;
+  let isExistingParent = false;
 
-  // 2. Create Student
+  // Check if Parent already exists
+  if (parentEmail) {
+    parentDocToUse = await Parent.findOne({ schoolId, email: parentEmail });
+  }
+
+  // If not, create a new Parent safely
+  if (!parentDocToUse) {
+    isExistingParent = false;
+    const lastParent = await Parent.findOne({ schoolId }).sort({ parentID: -1 }).lean();
+    let nextParentNum = 1;
+    if (lastParent && lastParent.parentID) {
+      const match = lastParent.parentID.match(/\d{4}$/);
+      if (match) nextParentNum = parseInt(match[0]) + 1;
+    }
+
+    let parentID = `PAR${year}${nextParentNum.toString().padStart(4, '0')}`;
+    let pExists = await Parent.findOne({ schoolId, parentID }).lean();
+    while (pExists) {
+      nextParentNum++;
+      parentID = `PAR${year}${nextParentNum.toString().padStart(4, '0')}`;
+      pExists = await Parent.findOne({ schoolId, parentID }).lean();
+    }
+
+    parentIDStr = parentID;
+    const finalParentEmail = parentEmail || `p_${parentID}@school.com`;
+
+    parentDocToUse = await Parent.create({
+      schoolId,
+      name: enquiry.parentName,
+      email: finalParentEmail,
+      password: defaultPassword,
+      parentID,
+      phone: enquiry.primaryPhone,
+      relation: 'Father', // Safe default fallback
+      occupation: enquiry.occupation,
+      address: { street: enquiry.address },
+      role: 'parent',
+      isActive: true,
+      children: []
+    });
+  } else {
+    isExistingParent = true;
+    parentIDStr = parentDocToUse.parentID;
+  }
+
+  // 2. Generate Student ID safely
+  const lastStudent = await Student.findOne({ schoolId }).sort({ studentID: -1 }).lean();
+  let nextStudentNum = 1;
+  if (lastStudent && lastStudent.studentID) {
+    const match = lastStudent.studentID.match(/\d{4}$/);
+    if (match) nextStudentNum = parseInt(match[0]) + 1;
+  }
+
+  let studentID = `STU${year}${nextStudentNum.toString().padStart(4, '0')}`;
+  let sExists = await Student.findOne({ schoolId, studentID }).lean();
+  while (sExists) {
+    nextStudentNum++;
+    studentID = `STU${year}${nextStudentNum.toString().padStart(4, '0')}`;
+    sExists = await Student.findOne({ schoolId, studentID }).lean();
+  }
+
+  // 3. Create Student
   const newStudent = await Student.create({
     schoolId,
     name: enquiry.studentName,
     studentID,
     password: defaultPassword,
+    mobileNumber: enquiry.primaryPhone, // ✅ Satisfies Student Schema requirement using Parent's phone
     // Very rough estimate of DOB based on age if provided
     dateOfBirth: enquiry.age ? new Date(new Date().setFullYear(new Date().getFullYear() - enquiry.age)) : undefined, 
     gender: enquiry.gender || 'Male',
     fatherName: enquiry.parentName,
     fatherPhone: enquiry.primaryPhone,
     address: { street: enquiry.address },
-    class: targetClass._id,
-    className: targetClass.className,
-    academicYear: resolvedAcademicYear,
-    parent: newParent._id,
-    status: 'ENROLLED',
+    targetGrade: targetClass.className,
+    registrationYear: resolvedAcademicYear,
+    parent: parentDocToUse._id,
+    status: 'ADMITTED',
     role: 'student',
     isActive: true,
     admissionDate: new Date()
   });
 
   // Link Child to Parent
-  newParent.children.push(newStudent._id);
-  await newParent.save();
+  parentDocToUse.children.push(newStudent._id);
+  await parentDocToUse.save();
 
   // 3. Mark Enquiry as Admitted
   enquiry.status = 'ADMITTED';
@@ -253,8 +293,13 @@ export const convertEnquiryToStudent = asyncHandler(async (req, res) => {
 
   return successResponse(res, 'Enquiry successfully converted to Student', {
     student: newStudent,
-    parent: newParent,
-    credentials: { studentID, parentID, password: 'Welcome@123' }
+    parent: parentDocToUse,
+    credentials: { 
+      studentID, 
+      parentID: parentIDStr, 
+      password: 'Welcome@123',
+      parentPassword: isExistingParent ? null : 'Welcome@123'
+    }
   }, 201);
 });
 
@@ -417,5 +462,4 @@ export const getEnquiryAnalytics = asyncHandler(async (req, res) => {
     conversionRate: `${conversionRate}%`,
     financials: { totalMarketingExpense, customerAcquisitionCost: cac }
   });
-  
 });

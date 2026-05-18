@@ -2,7 +2,8 @@
 import Student from '../../models/Student.js';
 import Class from '../../models/Class.js';
 import Result from '../../models/Result.js';
-import { successResponse, paginatedResponse } from '../../utils/response.js';
+import Enrollment from '../../models/Enrollment.js';
+import { successResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
@@ -30,12 +31,40 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
     search, hasEmail, hasSection, sortBy 
   } = req.query;
   
-  const filter = {
-    schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
-  };
+  let studentFilter = { schoolId: req.schoolId };
+  if (status) studentFilter.status = status;
   
-  // Basic filters
-  // if (className) filter.className = className;
+  if (hasEmail === 'true') {
+    studentFilter.email = { $exists: true, $nin: [null, ''] };
+  } else if (hasEmail === 'false') {
+    studentFilter.$or = [
+      { email: { $exists: false } },
+      { email: null },
+      { email: '' }
+    ];
+  }
+  
+  if (search) {
+    studentFilter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { studentID: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { fatherName: { $regex: search, $options: 'i' } },
+      { motherName: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  let studentIds = null;
+  if (status || search || hasEmail !== undefined) {
+    const matchedStudents = await Student.find(studentFilter).select('_id');
+    studentIds = matchedStudents.map(s => s._id);
+  }
+
+  const enrollFilter = { schoolId: req.schoolId, status: { $ne: 'DROPPED' } };
+  if (academicYear) enrollFilter.academicYear = academicYear;
+  if (section) enrollFilter.section = section;
+  if (studentIds !== null) enrollFilter.student = { $in: studentIds };
+
   if (className) {
     const classDoc = await Class.findOne({
       schoolId: req.schoolId,
@@ -47,7 +76,7 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
     });
 
     if (classDoc) {
-      filter.class = classDoc._id;   // ✅ Correct filtering
+      enrollFilter.class = classDoc._id;
     } else {
       return res.status(200).json({
         success: true,
@@ -62,58 +91,47 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
       });
     }
   }
-  if (section) filter.section = section;
-  if (academicYear) filter.academicYear = academicYear;
-  if (status) filter.status = status;
-  
-  // Advanced filters
-  if (hasEmail === 'true') {
-    filter.email = { $exists: true, $ne: null, $ne: '' };
-  } else if (hasEmail === 'false') {
-    filter.$or = [
-      { email: { $exists: false } },
-      { email: null },
-      { email: '' }
-    ];
-  }
   
   if (hasSection === 'true') {
-    filter.section = { $exists: true, $ne: null, $ne: '' };
+    enrollFilter.section = { $exists: true, $nin: [null, ''] };
   } else if (hasSection === 'false') {
-    filter.$or = [
+    enrollFilter.$or = [
       { section: { $exists: false } },
       { section: null },
       { section: '' }
     ];
   }
   
-  // Search filter
-  if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { studentID: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { fatherName: { $regex: search, $options: 'i' } },
-      { motherName: { $regex: search, $options: 'i' } }
-    ];
-  }
-  
   // Sorting
   let sort = { createdAt: -1 };
-  if (sortBy === 'name') sort = { name: 1 };
-  else if (sortBy === 'rollNumber') sort = { rollNumber: 1 };
-  else if (sortBy === 'admissionDate') sort = { admissionDate: -1 };
+  // If sorting by name, it will just default to createdAt since name is populated, 
+  // but let's sort by rollNumber generally for Roster.
+  if (sortBy === 'rollNumber') sort = { rollNumber: 1 };
   else if (sortBy === 'className') sort = { className: 1, section: 1, rollNumber: 1 };
   
-  const [studentsRaw, total] = await Promise.all([
-    Student.find(filter)
+  const [enrollmentsRaw, total] = await Promise.all([
+    Enrollment.find(enrollFilter)
+      .populate('student', '-password')
       .populate('class', 'className sections')
-      .select('-password')
       .sort(sort)
       .skip(skip)
-      .limit(limit),
-    Student.countDocuments(filter)
+      .limit(limit)
+      .lean(),
+    Enrollment.countDocuments(enrollFilter)
   ]);
+
+  const studentsRaw = enrollmentsRaw.map(e => {
+    if (!e.student) return null;
+    return {
+      ...e.student,
+      class: e.class,
+      className: e.className,
+      section: e.section,
+      rollNumber: e.rollNumber,
+      academicYear: e.academicYear,
+      enrollmentId: e._id
+    };
+  }).filter(Boolean);
   
   // 🔥 CORE LOGIC: Link FINAL Result with each student
   const students = await Promise.all(studentsRaw.map(async (student) => {
@@ -125,7 +143,7 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
     }).select('result overallPercentage overallGrade isPublished');
 
     return {
-      ...student.toObject(),
+      ...student,
       finalResult: finalResult || null // Frontend isse badge dikhayega
     };
   }));
@@ -187,44 +205,36 @@ export const getStudentsManagement = asyncHandler(async (req, res) => {
 export const getStudentStatistics = asyncHandler(async (req, res) => {
   const { academicYear, className } = req.query;
   
-  const filter = { schoolId: req.schoolId };
-  if (academicYear) filter.academicYear = academicYear;
-  if (className) filter.className = className;
+  const enrollFilter = { schoolId: req.schoolId, status: { $ne: 'DROPPED' } };
+  if (academicYear) enrollFilter.academicYear = academicYear;
+  if (className) enrollFilter.className = className;
   
-  const [
-    totalStudents,
-    enrolledStudents,
-    suspendedStudents,
-    withdrawnStudents,
-    graduatedStudents,
-    studentsByClass,
-    studentsByGender
-  ] = await Promise.all([
-    Student.countDocuments(filter),
-    Student.countDocuments({ ...filter, status: 'ENROLLED' }),
-    Student.countDocuments({ ...filter, status: 'SUSPENDED' }),
-    Student.countDocuments({ ...filter, status: 'WITHDRAWN' }),
-    Student.countDocuments({ ...filter, status: 'GRADUATED' }),
-    Student.aggregate([
-      { $match: filter },
-      { 
-        $group: { 
-          _id: { className: '$className', section: '$section' },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id.className': 1, '_id.section': 1 } }
-    ]),
-    Student.aggregate([
-      { $match: filter },
-      { 
-        $group: { 
-          _id: '$gender',
-          count: { $sum: 1 }
-        }
-      }
-    ])
-  ]);
+  const enrollments = await Enrollment.find(enrollFilter).populate('student', 'status gender').lean();
+
+  let totalStudents = enrollments.length;
+  let enrolledStudents = 0;
+  let suspendedStudents = 0;
+  let withdrawnStudents = 0;
+  let graduatedStudents = 0;
+
+  const classCountMap = {};
+  const genderCountMap = {};
+
+  enrollments.forEach(e => {
+     const st = e.student;
+     if (!st) return;
+
+     if (st.status === 'ACTIVE') enrolledStudents++;
+     else if (st.status === 'WITHDRAWN') withdrawnStudents++;
+     else if (st.status === 'ALUMNI') graduatedStudents++;
+
+     const classKey = `${e.className}_${e.section}`;
+     if (!classCountMap[classKey]) classCountMap[classKey] = { className: e.className, section: e.section, count: 0 };
+     classCountMap[classKey].count++;
+
+     const gender = st.gender || 'Unknown';
+     genderCountMap[gender] = (genderCountMap[gender] || 0) + 1;
+  });
   
   const statistics = {
     total: totalStudents,
@@ -235,15 +245,8 @@ export const getStudentStatistics = asyncHandler(async (req, res) => {
       graduated: graduatedStudents,
       pending: totalStudents - (enrolledStudents + suspendedStudents + withdrawnStudents + graduatedStudents)
     },
-    byClass: studentsByClass.map(item => ({
-      className: item._id.className,
-      section: item._id.section,
-      count: item.count
-    })),
-    byGender: studentsByGender.reduce((acc, item) => {
-      acc[item._id || 'Unknown'] = item.count;
-      return acc;
-    }, {})
+    byClass: Object.values(classCountMap).sort((a, b) => a.className.localeCompare(b.className) || a.section.localeCompare(b.section)),
+    byGender: genderCountMap
   };
   
   return successResponse(res, 'Student statistics retrieved successfully', statistics);
@@ -257,8 +260,8 @@ export const bulkUpdateStatus = asyncHandler(async (req, res) => {
     throw new ValidationError('Student IDs array is required');
   }
   
-  if (!['ENROLLED', 'SUSPENDED', 'WITHDRAWN', 'GRADUATED', 'TRANSFERRED'].includes(status)) {
-    throw new ValidationError('Invalid status');
+  if (!['APPLICANT', 'ADMITTED', 'ACTIVE', 'ALUMNI', 'WITHDRAWN'].includes(status)) {
+    throw new ValidationError('Invalid status. Expected APPLICANT, ADMITTED, ACTIVE, ALUMNI, or WITHDRAWN.');
   }
   
   const result = await Student.updateMany(
@@ -309,68 +312,64 @@ export const promoteStudents = asyncHandler(async (req, res) => {
     throw new NotFoundError('Target class');
   }
   
-  // Get students to promote
-  const filter = { schoolId: req.schoolId };
-  if (studentIds && studentIds.length > 0) {
-    filter._id = { $in: studentIds };
-  } else if (sourceClassId) {
-    filter.class = sourceClassId;
-  } else {
+  let studentsToPromote = studentIds;
+  
+  if (!studentsToPromote || studentsToPromote.length === 0) {
+    if (sourceClassId) {
+      const sourceEnrollments = await Enrollment.find({ schoolId: req.schoolId, class: sourceClassId, status: 'ACTIVE' }).select('student').lean();
+      studentsToPromote = sourceEnrollments.map(e => e.student);
+    } else {
     throw new ValidationError('Either studentIds or sourceClassId is required');
+    }
   }
   
-  const students = await Student.find(filter);
-  
-  if (students.length === 0) {
+  if (!studentsToPromote || studentsToPromote.length === 0) {
     throw new ValidationError('No students found to promote');
   }
   
-  // Update source class section strengths
-  if (sourceClassId) {
-    const sourceClass = await Class.findOne({ _id: sourceClassId, schoolId: req.schoolId });
-    if (sourceClass) {
-      students.forEach(student => {
-        if (student.section) {
-          const section = sourceClass.sections.find(s => s.sectionName === student.section);
-          if (section && section.currentStrength > 0) {
-            section.currentStrength -= 1;
-          }
-        }
-      });
-      await sourceClass.save();
-    }
-  }
+  await Student.updateMany(
+    { _id: { $in: studentsToPromote }, schoolId: req.schoolId },
+    { status: 'ACTIVE' }
+  );
+
+  await Enrollment.updateMany(
+    { student: { $in: studentsToPromote }, schoolId: req.schoolId, status: 'ACTIVE' },
+    { status: 'PROMOTED' }
+  );
   
-  // Promote students
-  const promotionData = {
-    class: targetClassId,
-    className: targetClass.className,
-    academicYear: targetAcademicYear
-  };
+  const lastEnrollment = await Enrollment.findOne({
+    schoolId: req.schoolId, class: targetClassId, section: targetSection, academicYear: targetAcademicYear
+  }).sort({ rollNumber: -1 }).lean();
+  
+  let nextRollNumber = lastEnrollment && lastEnrollment.rollNumber ? lastEnrollment.rollNumber + 1 : 1;
   
   if (targetSection) {
-    promotionData.section = targetSection;
-    promotionData.status = 'ENROLLED';
-    
     // Update target section strength
     const targetSectionData = targetClass.sections.find(s => s.sectionName === targetSection);
     if (targetSectionData) {
-      targetSectionData.currentStrength += students.length;
+      targetSectionData.currentStrength += studentsToPromote.length;
       await targetClass.save();
     }
-  } else {
-    promotionData.section = '';
-    promotionData.rollNumber = '';
-    promotionData.status = 'REGISTERED';
   }
   
-  const result = await Student.updateMany(
-    { _id: { $in: students.map(s => s._id) }, schoolId: req.schoolId },
-    promotionData
-  );
+  const enrollmentDocs = studentsToPromote.map(studentId => {
+    const doc = {
+      schoolId: req.schoolId,
+      student: studentId,
+      class: targetClassId,
+      className: targetClass.className,
+      section: targetSection,
+      academicYear: targetAcademicYear,
+      rollNumber: nextRollNumber++,
+      status: 'ACTIVE'
+    }
+    return doc;
+  });
   
-  return successResponse(res, `Successfully promoted ${result.modifiedCount} students`, {
-    promotedCount: result.modifiedCount,
+  await Enrollment.insertMany(enrollmentDocs);
+  
+  return successResponse(res, `Successfully promoted ${studentsToPromote.length} students`, {
+    promotedCount: studentsToPromote.length,
     targetClass: targetClass.className,
     targetSection: targetSection || 'Not assigned',
     academicYear: targetAcademicYear
@@ -385,35 +384,12 @@ export const bulkDeleteStudents = asyncHandler(async (req, res) => {
     throw new ValidationError('Student IDs array is required');
   }
   
-  // Get students and update section strengths
-  const students = await Student.find({ _id: { $in: studentIds }, schoolId: req.schoolId });
-  
-  // Update class section strengths
-  const classUpdates = {};
-  
-  for (const student of students) {
-    if (student.class && student.section) {
-      const key = `${student.class}_${student.section}`;
-      if (!classUpdates[key]) {
-        classUpdates[key] = { classId: student.class, section: student.section, count: 0 };
-      }
-      classUpdates[key].count++;
-    }
-  }
-  
-  for (const key in classUpdates) {
-    const { classId, section, count } = classUpdates[key];
-    const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
-    if (classData) {
-      const sectionData = classData.sections.find(s => s.sectionName === section);
-      if (sectionData) {
-        sectionData.currentStrength = Math.max(0, sectionData.currentStrength - count);
-        await classData.save();
-      }
-    }
-  }
-  
   // Delete students
+  await Enrollment.updateMany(
+    { student: { $in: studentIds }, schoolId: req.schoolId },
+    { status: 'DROPPED' }
+  );
+  
   const result = await Student.updateMany(
     { _id: { $in: studentIds }, schoolId: req.schoolId },
     { $set: { isDeleted: true, deletedAt: new Date() } }
@@ -452,46 +428,25 @@ export const transferStudents = asyncHandler(async (req, res) => {
     throw new ValidationError(`Only ${availableSeats} seats available in target section`);
   }
   
-  const students = await Student.find({ _id: { $in: studentIds }, schoolId: req.schoolId });
-  
-  // Update source section strengths
-  const sourceClassUpdates = {};
-  
-  students.forEach(student => {
-    if (student.class && student.section) {
-      const key = `${student.class}_${student.section}`;
-      if (!sourceClassUpdates[key]) {
-        sourceClassUpdates[key] = { classId: student.class, section: student.section, count: 0 };
-      }
-      sourceClassUpdates[key].count++;
-    }
-  });
-  
-  for (const key in sourceClassUpdates) {
-    const { classId, section, count } = sourceClassUpdates[key];
-    const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
-    if (classData) {
-      const sectionData = classData.sections.find(s => s.sectionName === section);
-      if (sectionData && sectionData.currentStrength > 0) {
-        sectionData.currentStrength -= count;
-        await classData.save();
-      }
-    }
-  }
-  
   // Transfer students
-  const result = await Student.updateMany(
-    { _id: { $in: studentIds }, schoolId: req.schoolId },
+  await Enrollment.updateMany(
+    { student: { $in: studentIds }, schoolId: req.schoolId, status: 'ACTIVE' },
     {
       class: targetClassId,
       className: targetClass.className,
-      section: targetSection,
-      status: 'ENROLLED'
+      section: targetSection
+    }
+  );
+  
+  const result = await Student.updateMany(
+    { _id: { $in: studentIds }, schoolId: req.schoolId },
+    {
+      status: 'ACTIVE'
     }
   );
   
   // Update target section strength
-  targetSectionData.currentStrength += students.length;
+  targetSectionData.currentStrength += studentIds.length;
   await targetClass.save();
   
   return successResponse(res, `Successfully transferred ${result.modifiedCount} students`, {

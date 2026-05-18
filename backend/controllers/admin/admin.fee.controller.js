@@ -3,6 +3,7 @@ import FeeHead from '../../models/FeeHead.js';
 import Student from '../../models/Student.js';
 import Class from '../../models/Class.js';
 import School from '../../models/School.js';
+import Enrollment from '../../models/Enrollment.js';
 import mongoose from 'mongoose';
 import { generateInstallments } from '../../utils/fee.utils.js';
 import PDFDocument from 'pdfkit';
@@ -20,28 +21,38 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
 
   const statusFilter = status ? status.toUpperCase() : null;
 
-  // ✅ 2. Build filter safely
-  let filter = { schoolId, academicYear, role: 'student' };
+  // Search Students
+  let studentIds = null;
+  if (search) {
+    const matchedStudents = await Student.find({
+      schoolId,
+      $or: [
+        { name: { $regex: search, $options: 'i' } },
+        { studentID: { $regex: search, $options: 'i' } }
+      ]
+    }).select('_id');
+    studentIds = matchedStudents.map(s => s._id);
+  }
+
+  // ✅ 2. Build filter safely using Enrollment
+  let enrollFilter = { schoolId, academicYear, status: { $ne: 'DROPPED' } };
 
   // Agar classId valid MongoDB ID hai tabhi use karein
   if (classId && classId !== "ALL" && mongoose.Types.ObjectId.isValid(classId)) {
-    filter.class = new mongoose.Types.ObjectId(classId);
+    enrollFilter.class = new mongoose.Types.ObjectId(classId);
+  }
+  
+  if (studentIds !== null) {
+      enrollFilter.student = { $in: studentIds };
   }
 
-  if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { studentID: { $regex: search, $options: 'i' } }
-    ];
-  }
-
-  // ✅ 3. Fetch ALL matching Students first
-  const students = await Student.find(filter).select('-password').lean();
+  // ✅ 3. Fetch ALL matching Enrollments first
+  const enrollments = await Enrollment.find(enrollFilter).populate({ path: 'student', select: '-password' }).lean();
   
   // ✅ 4. Fetch ALL Fee Payments for these students in ONE single query (Fixes N+1 issue)
-  const studentIds = students.map(s => s._id);
+  const finalStudentIds = enrollments.map(e => e.student?._id).filter(Boolean);
   const feePayments = await FeePayment.find({
-    student: { $in: studentIds },
+    student: { $in: finalStudentIds },
     academicYear,
     schoolId
   }).lean();
@@ -56,7 +67,14 @@ export const getStudentsWithFees = asyncHandler(async (req, res) => {
   let totalPendingStats = 0;
   let totalPaidStats = 0;
 
-  for (const student of students) {
+  for (const enrollment of enrollments) {
+    const student = enrollment.student;
+    if (!student) continue;
+    
+    student.class = enrollment.class;
+    student.className = enrollment.className;
+    student.section = enrollment.section;
+
     // 🔍 Find Fee Record instantly from memory map
     const fp = feeMap.get(student._id.toString());
 
@@ -213,9 +231,12 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
   );
 
   // 3. 🔥 Sync to ALL Students in this Class (Across all sections)
-  const students = await Student.find({ className, academicYear, schoolId });
+  const enrollments = await Enrollment.find({ className, academicYear, schoolId, status: { $ne: 'DROPPED' } }).populate('student');
 
-  const bulkOps = students.map(student => {
+  const bulkOps = enrollments.map(enrollment => {
+    const student = enrollment.student;
+    if (!student) return null;
+    
     // 🔥 Aapka generateInstallments yahan use ho raha hai
     const studentInstallments = generateInstallments(feeStructure, academicYear);
     const grandTotal = studentInstallments.reduce((sum, i) => sum + i.amount, 0);
@@ -225,22 +246,22 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
         filter: { student: student._id, academicYear, schoolId },
         update: {
          $set: {
-  class: student.class,   // 🔥 ADD THIS
-  installments: studentInstallments,
-  totalDue: grandTotal,
-  totalPaid: 0,
-  balancePending: grandTotal,
-  status: 'PENDING',
-  studentName: student.name,
-  studentID: student.studentID,
-  className: className,
-  section: student.section
-}
+          class: enrollment.class,   // 🔥 ADD THIS
+          installments: studentInstallments,
+          totalDue: grandTotal,
+          totalPaid: 0,
+          balancePending: grandTotal,
+          status: 'PENDING',
+          studentName: student.name,
+          studentID: student.studentID,
+          className: enrollment.className,
+          section: enrollment.section
+        }
         },
         upsert: true
       }
     };
-  });
+  }).filter(Boolean);
 
   if (bulkOps.length > 0) {
     await FeePayment.bulkWrite(bulkOps);
@@ -252,10 +273,13 @@ export const setClassFeeStructure = asyncHandler(async (req, res) => {
 export const assignFeeStructureToStudent = asyncHandler(async (req, res) => {
   const { studentId, academicYear } = req.body;
 
-  const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId }).populate('class');
+  const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
   if (!student) throw new NotFoundError('Student');
 
-  const classData = await Class.findOne({ _id: student.class, schoolId: req.schoolId }).populate('feeStructure.head');
+  const enrollment = await Enrollment.findOne({ student: studentId, academicYear, schoolId: req.schoolId, status: { $ne: 'DROPPED' } });
+  if (!enrollment) throw new ValidationError('Student is not enrolled in any class for this academic year');
+
+  const classData = await Class.findOne({ _id: enrollment.class, schoolId: req.schoolId }).populate('feeStructure.head');
   if (!classData || !classData.feeStructure.length) {
     throw new ValidationError('No Fee Structure defined for this class');
   }
@@ -275,12 +299,12 @@ export const assignFeeStructureToStudent = asyncHandler(async (req, res) => {
   const feePayment = await FeePayment.create({
     schoolId: req.schoolId,
     student: student._id,
-    class: student.class,
+    class: enrollment.class,
     academicYear,
     studentName: student.name,
     studentID: student.studentID,
-    className: student.className,
-    section: student.section,
+    className: enrollment.className,
+    section: enrollment.section,
     installments,
     feeStructure: classData.feeStructure,
     totalAmount: grandTotal,
@@ -304,18 +328,21 @@ export const createBulkFeeStructureFromClass = asyncHandler(async (req, res) => 
   if (!classData.feeStructure || classData.feeStructure.length === 0) {
     throw new ValidationError('Fee structure not set for this class.');
   }
-  const students = await Student.find({
+  const enrollments = await Enrollment.find({
     class: classId,
     academicYear,
-    status: { $in: ['ENROLLED', 'ACTIVE'] },
+    status: { $ne: 'DROPPED' },
     schoolId: req.schoolId
-  });
-  if (students.length === 0) {
+  }).populate('student');
+  
+  if (enrollments.length === 0) {
     throw new ValidationError('No enrolled students found for this class and academic year');
   }
 
   const results = { created: [], skipped: [], failed: [] };
-  for (const student of students) {
+  for (const enrollment of enrollments) {
+    const student = enrollment.student;
+    if (!student) continue;
     try {
       const existingFee = await FeePayment.findOne({ 
         student: student._id, 
@@ -391,12 +418,12 @@ export const createBulkFeeStructureFromClass = asyncHandler(async (req, res) => 
       const feePayment = await FeePayment.create({
         schoolId: req.schoolId,
         student: student._id,
-        class: student.class,
+        class: enrollment.class,
         academicYear,
         studentName: student.name,
         studentID: student.studentID,
-        className: student.className,
-        section: student.section,
+        className: enrollment.className,
+        section: enrollment.section,
         installments: installments,
         feeStructure: classData.feeStructure,
         totalAmount: grandTotal,
@@ -422,7 +449,7 @@ export const createBulkFeeStructureFromClass = asyncHandler(async (req, res) => 
   }
 
   return successResponse(res, 'Bulk fee structure created successfully', {
-    totalStudents: students.length,
+    totalStudents: enrollments.length,
     created: results.created.length,
     skipped: results.skipped.length,
     failed: results.failed.length,

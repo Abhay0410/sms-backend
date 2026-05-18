@@ -1,0 +1,156 @@
+ENROLLMENT & ADMISSIONS PIPELINE - EXECUTION PLAN
+===================================================
+
+Overview: 
+Transitioning from a tightly-coupled Student-Class structure to a multi-year Enrollment 
+Junction architecture. This prevents roster pollution, keeps historical records intact, 
+and separates the CRM (Admissions) from Academics (Active Roster).
+
+PHASE 1: DATABASE SCHEMA OVERHAUL
+---------------------------------------------------
+1. Create `models/Enrollment.js`:
+   - Fields: schoolId (Ref), student (Ref), class (Ref), className, section, academicYear, rollNumber, status (ACTIVE/PROMOTED/DROPPED).
+   - Compound Index: Ensure uniqueness for { schoolId, student, academicYear }.
+
+2. Modify `models/Student.js`:
+   - REMOVE: `class`, `className`, `section`, `rollNumber`. (Keep `academicYear` only as 'registrationYear' or remove it).
+   - MODIFY: `status` enum to represent the relationship with the school: ['APPLICANT', 'ADMITTED', 'ACTIVE', 'ALUMNI', 'WITHDRAWN'].
+   - ADD: `targetGrade` (String) to store the grade they applied for before being assigned a section.
+
+
+PHASE 2: THE DATA MIGRATION SCRIPT (CRITICAL)
+---------------------------------------------------
+Before deploying new code, existing data must be ported.
+1. Create `scripts/migrate_enrollments.js`.
+2. Logic:
+   - Fetch all `Student` documents that have a `class` and `section`.
+   - Iterate and create an `Enrollment` document for each, copying over `class`, `className`, `section`, `academicYear`, and `rollNumber`.
+   - Update the `Student` document: set `status` to 'ACTIVE' and `$unset` the old class/section fields.
+
+
+PHASE 3: ADMISSIONS PIPELINE REFACTORING (CRM)
+---------------------------------------------------
+File: `controllers/admin/admin.enquiry.controller.js`
+
+1. Refactor `convertEnquiryToStudent()`:
+   - Currently, this assigns `class`, `section` and sets status to 'ENROLLED'.
+   - NEW LOGIC: It should only create the `Student` profile and `Parent` profile.
+   - Set student `status` to 'ADMITTED' (or 'APPLICANT').
+   - Set `targetGrade` based on the Enquiry's target class.
+   - DO NOT create an `Enrollment` record here. They are now safely in the "Applicant Ledger" waiting for the Admin to assign them.
+
+
+PHASE 4: THE ENROLLMENT BRIDGE (THE MATCHMAKER)
+---------------------------------------------------
+File: `controllers/admin/admin.enrollment.controller.js` (NEW FILE)
+
+1. Create `getUnassignedAdmissions()`:
+   - Queries `Student.find({ schoolId, status: 'ADMITTED' })` that do NOT have an active Enrollment for the current academic year.
+   - Returns the pool of paid/approved students waiting for a section.
+
+2. Create `bulkEnrollStudents(studentIds, classId, sectionName, academicYear)`:
+   - Takes an array of selected student IDs.
+   - Finds the target `Class` and checks section capacity (`classData.sections.find(...)`).
+   - Finds the highest `rollNumber` currently in that section.
+   - Loops through `studentIds`, generates sequential roll numbers.
+   - Creates `Enrollment` records.
+   - Updates Student `status` to 'ACTIVE'.
+   - Increments the `currentStrength` in the `Class` section.
+
+
+PHASE 5: ACADEMIC ROSTER REFACTORING
+---------------------------------------------------
+Files: `admin.student.controller.js` & `admin.student.management.controller.js`
+
+1. Refactor `getAllStudents()` & `getStudentsManagement()`:
+   - Currently queries the `Student` model directly.
+   - NEW LOGIC: Must query the `Enrollment` model.
+   - `Enrollment.find({ schoolId, academicYear, class, section }).populate('student')`
+   - Map the results so the frontend still receives the expected student object structure (merge Enrollment data into the Student object before sending to the client).
+
+2. Refactor `promoteStudents()`:
+   - Currently updates the `Student` document.
+   - NEW LOGIC: 
+     a. Fetch current `Enrollment` records for the selected students.
+     b. Mark current Enrollments as `PROMOTED`.
+     c. Create NEW `Enrollment` records for the target class/section and the next academic year.
+
+3. Refactor `createStudent()` / `createStudentWithParent()`:
+   - If an admin creates a student directly (bypassing enquiry), create the `Student` profile AND immediately call the logic to create the `Enrollment` record.
+
+
+PHASE 6: FEE MODULE SYNC
+---------------------------------------------------
+File: `admin.fee.controller.js`
+
+1. Refactor `setClassFeeStructure` and `assignFeeStructureToStudent`:
+   - Fee Generation usually depends on `student.class`.
+   - Ensure fee logic now queries `Enrollment.find({ class: classId })` to find which students are actually sitting in that class for the given academic year, rather than looking at the `Student` table.
+
+
+PHASE 7: FRONTEND UI INTEGRATION
+This phase details the necessary frontend changes to leverage the new backend architecture.
+
+**Task 1: Update API Endpoints Constant File**
+File: `src/constants/apiEndpoints.js`
+Action: Add the new enrollment endpoints to your `API_ENDPOINTS` constant. This makes API calls cleaner and easier to manage.
+
+**Task 2: Create the "Admissions Pool" / "Matchmaker" Component**
+This is the core UI for the new workflow. It combines the "Admissions Roster" and "Matchmaker UI" into a single, powerful screen.
+
+*   **Component:** Create a new page/component, e.g., `src/pages/admin/students/BulkEnrollment.jsx`.
+*   **Layout:** Use a two-column (split-screen) layout.
+
+*   **Left Pane: "Unassigned Admissions Pool"**
+    1.  **Purpose:** To list all students with `status: 'ADMITTED'` who are waiting for a section.
+    2.  **API Call:** On component mount, and whenever filters change, call `API_ENDPOINTS.ADMIN.ENROLLMENT.GET_UNASSIGNED`.
+    3.  **Filters:**
+        *   **Academic Year (Required):** A dropdown to select the academic year. The API requires this.
+        *   **Target Grade (Optional):** A dropdown to filter students by the grade they applied for (e.g., "Grade 5", "Grade 6").
+    4.  **Display:**
+        *   A table showing the filtered students.
+        *   **Columns:** Checkbox, Student Name, Student ID, Target Grade, Admission Date.
+        *   A counter above the table: `[X] students selected`.
+
+*   **Right Pane: "Target Class & Section"**
+    1.  **Purpose:** To select the destination for the students chosen in the left pane.
+    2.  **UI Elements:**
+        *   **Academic Year Dropdown:** Should be synced with the left pane's selection.
+        *   **Class Dropdown:** Populate with classes for the selected academic year.
+        *   **Section Dropdown:** Populate with sections for the selected class.
+    3.  **Live Data Display:**
+        *   Below the dropdowns, show the selected section's capacity: `Strength: 24 / 30`.
+        *   This data is available in the `Class` model which can be fetched when a class is selected.
+
+*   **The "Assign" Action Button**
+    1.  **Placement:** A prominent button, perhaps in the middle or at the bottom of the right pane. Label: `Assign Selected Students`.
+    2.  **On-Click Logic:**
+        a. Get `studentIds` from the checked boxes in the left pane.
+        b. Get `classId`, `sectionName`, and `academicYear` from the right pane's dropdowns.
+        c. **Client-Side Validation:** Check if `studentIds.length` is greater than available seats. If so, show an error toast.
+        d. **API Call:** If validation passes, make a `POST` request to `API_ENDPOINTS.ADMIN.ENROLLMENT.BULK_ENROLL` with the payload.
+        e. **On Success:**
+           i. Show a success message: "Successfully enrolled [X] students."
+           ii. **Crucially, re-fetch the data** for the left pane to remove the newly assigned students.
+           iii. Update the "Strength" display in the right pane.
+
+**Task 3: Refactor Existing Student Roster UIs**
+Anywhere you display a list of active students (e.g., Student Management, Fee Collection, Attendance Roster) needs to be updated.
+
+*   **Affected Components:** `StudentManagement.jsx`, `FeeStudents.jsx`, etc.
+*   **Core Change:** These components must now be driven by the `academicYear`.
+*   **Implementation:**
+    1.  Add a global or page-level "Academic Year" dropdown selector. This should be the primary filter for viewing any roster.
+    2.  Modify all API calls to `API_ENDPOINTS.ADMIN.STUDENT.ALL`, `API_ENDPOINTS.ADMIN.STUDENT_MANAGEMENT.LIST`, and `API_ENDPOINTS.ADMIN.FEE.STUDENTS_WITH_FEES`.
+    3.  **Ensure the `academicYear` parameter is ALWAYS passed in the request query.** The backend now relies on this to fetch the correct `Enrollment` records.
+
+**Task 4: Refactor Student Promotion UI**
+The UI for promoting students at the end of the year needs to be updated.
+
+*   **Affected Component:** `PromoteStudentsModal.jsx` or similar.
+*   **Old Logic:** Likely updated the `student.class` field directly.
+*   **New Logic:**
+    1.  The UI should gather `studentIds` to be promoted.
+    2.  It needs dropdowns to select the **target** `academicYear`, `targetClassId`, and `targetSection`.
+    3.  The "Promote" button will now call the refactored `promoteStudents` endpoint (`/api/admin/student-management/promote`).
+    4.  The backend now handles the complex logic of marking old enrollments as 'PROMOTED' and creating new 'ACTIVE' ones for the next year. The frontend's job is simply to supply the correct IDs and year.

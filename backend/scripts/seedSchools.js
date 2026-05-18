@@ -16,66 +16,28 @@ const seedSchools = async () => {
   try {
     await connectDB();
 
-    await School.deleteMany({});
-    await Admin.deleteMany({}); // Clear existing admins
+    // COMMENTED OUT TO PREVENT DELETING OLD SCHOOLS
+    // await School.deleteMany({});
+    // await Admin.deleteMany({}); 
 
     const schoolsData = [
       { 
-        schoolName: 'Green Valley School', 
-        schoolCode: 'SCH001', 
-        adminEmail: 'principal@greenvalley.com',
-        phone: '9876543210',
-        address: {
-          street: 'Near Main Road',
-          city: 'Bhubaneswar',
-          state: 'Odisha',
-          pincode: '751001',
-          country: 'India',
-        },
-      },
-      { 
-        schoolName: 'Blue Ridge Academy', 
-        schoolCode: 'SCH002', 
-        adminEmail: 'admin@blueridge.com',
-        phone: '9876543211',
-        address: {
-          street: 'Sector 5',
-          city: 'Cuttack',
-          state: 'Odisha',
-          pincode: '753001',
-          country: 'India',
-        },
-      },
-      { 
-        schoolName: 'Sunshine Public School', 
-        schoolCode: 'SCH003', 
-        adminEmail: 'principal@sunshine.com',
-        phone: '9876543212',
-        address: {
-          street: 'Opposite Bus Stand',
-          city: 'Bhubaneswar',
-          state: 'Odisha',
-          pincode: '751002',
-          country: 'India',
-        },
-      },
-      { 
-        schoolName: 'Bulk Import High', 
-        schoolCode: 'SCH004', 
-        adminEmail: 'admin@bulktest.com',
+        schoolName: 'Delhi Public School', 
+        schoolCode: 'SCH005', 
+        adminEmail: 'principal@dps.com',
         phone: '9988776655',
         address: {
-          street: 'Tech Park Road',
-          city: 'Hyderabad',
-          state: 'Telangana',
-          pincode: '500081',
+          street: 'Main Road',
+          city: 'Delhi',
+          state: 'Delhi',
+          pincode: '110001',
           country: 'India',
         },
       },
     ];
 
     const schools = await School.insertMany(schoolsData);
-    console.log('✅ 3 Demo Schools Created!');
+    console.log('✅ New School Created!');
 
     // Create Admins for these schools
     const hashedPassword = await bcrypt.hash('Admin@123', 10);

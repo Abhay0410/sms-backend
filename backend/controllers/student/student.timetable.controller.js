@@ -1,6 +1,7 @@
 // controllers/student/student.timetable.controller.js - MULTI-TENANT VERSION
 import Timetable from "../../models/Timetable.js";
 import Student from "../../models/Student.js";
+import Enrollment from "../../models/Enrollment.js";
 import Class from "../../models/Class.js";
 import { successResponse } from "../../utils/response.js";
 import { NotFoundError, ValidationError } from "../../utils/errors.js";
@@ -14,39 +15,46 @@ export const getMyTimetable = asyncHandler(async (req, res) => {
   const student = await Student.findOne({
     _id: studentId,
     schoolId: req.schoolId  // ✅ CRITICAL
-  }).select("class className section academicYear name studentID");
+  }).select("name studentID").lean();
 
   if (!student) {
     throw new NotFoundError("Student");
   }
 
-  if (!student.class || !student.section) {
+  // ✅ NEW: Fetch current enrollment data
+  const enrollment = await Enrollment.findOne({
+    student: studentId,
+    schoolId: req.schoolId,
+    status: 'ACTIVE'
+  }).lean();
+
+  if (!enrollment || !enrollment.class || !enrollment.section) {
     throw new ValidationError("You have not been assigned to a class/section yet");
   }
 
   // ✅ MULTI-TENANT: 2) Timetable from Timetable collection (school-scoped)
   const timetable = await Timetable.findOne({
     schoolId: req.schoolId,  // ✅ MULTI-TENANT
-    class: student.class,    // Use ObjectId ref instead of className
-    section: student.section,
-    academicYear: student.academicYear,
+    class: enrollment.class,    // Use ObjectId ref from enrollment
+    section: enrollment.section,
+    academicYear: enrollment.academicYear,
     isActive: true,
     status: "published",
   }).populate("schedule.periods.teacher", "name teacherID");
 
   if (!timetable) {
-    throw new NotFoundError(`Timetable not found for ${student.className}-${student.section}`);
+    throw new NotFoundError(`Timetable not found for ${enrollment.className}-${enrollment.section}`);
   }
 
   // ✅ MULTI-TENANT: 3) Get class teacher from Class model
   const classData = await Class.findOne({
-    _id: student.class,
+    _id: enrollment.class,
     schoolId: req.schoolId
   }).select("sections");
 
   let classTeacher = null;
   if (classData && classData.sections) {
-    const studentSection = classData.sections.find(sec => sec.sectionName === student.section);
+    const studentSection = classData.sections.find(sec => sec.sectionName === enrollment.section);
     if (studentSection?.classTeacher) {
       classTeacher = await Student.populate(studentSection, {
         path: 'classTeacher',
@@ -84,13 +92,13 @@ export const getMyTimetable = asyncHandler(async (req, res) => {
     student: {
       name: student.name,
       studentID: student.studentID,
-      className: student.className,
-      section: student.section,
+      className: enrollment.className,
+      section: enrollment.section,
     },
     classTeacher,
     subjects,
     timetable: timetable.schedule || [],
-    academicYear: student.academicYear,
+    academicYear: enrollment.academicYear,
     effectiveFrom: timetable.effectiveFrom,
     effectiveTo: timetable.effectiveTo
   });

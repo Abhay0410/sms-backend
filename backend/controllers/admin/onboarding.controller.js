@@ -8,6 +8,7 @@ import Class from '../../models/Class.js';
 import Teacher from '../../models/Teacher.js';
 import FeeHead from '../../models/FeeHead.js';
 import FeePayment from '../../models/FeePayment.js';
+import Enrollment from '../../models/Enrollment.js';
 import { generateInstallments } from '../../utils/fee.utils.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { successResponse } from '../../utils/response.js';
@@ -302,10 +303,22 @@ export const importStudents = asyncHandler(async (req, res) => {
             // 6. 🚀 CREATE STUDENT
             const newStudent = await Student.create({
               schoolId, name: rawName, studentID: finalID, admissionNumber: csvAdmissionID,
-              password: pass, class: targetClass._id, className: targetClass.className,
-              section: getVal(row, 'Section') || 'A', academicYear, parent: parent._id,
-              gender: getVal(row, 'Gender') || 'Male', status: 'ENROLLED',
+              password: pass, 
+              registrationYear: academicYear,
+              targetGrade: targetClass.className, 
+              parent: parent._id,
+              gender: getVal(row, 'Gender') || 'Male', status: 'ACTIVE',
               fatherName: getVal(row, 'ParentName') || rawName // ✅ FIX: Add required fatherName
+            });
+
+            await Enrollment.create({
+              schoolId,
+              student: newStudent._id,
+              class: targetClass._id,
+              className: targetClass.className,
+              section: getVal(row, 'Section') || 'A',
+              academicYear,
+              status: 'ACTIVE'
             });
 
             await Parent.findByIdAndUpdate(parent._id, { $addToSet: { children: newStudent._id } });

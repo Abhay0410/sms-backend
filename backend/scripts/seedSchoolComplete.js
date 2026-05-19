@@ -199,7 +199,8 @@ const run = async () => {
   try {
     await connectDB();
 
-    const schoolCodes = ['SCH001', 'SCH002', 'SCH003'];
+    // 👉 Sirf naye school ka code dalein taki purane schools reset na hon
+    const schoolCodes = ['SCH005'];
     for (const code of schoolCodes) {
       console.log('\n' + '='.repeat(50));
       await seedSchoolComplete(code);

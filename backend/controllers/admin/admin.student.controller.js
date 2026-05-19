@@ -3,6 +3,7 @@ import Student from '../../models/Student.js';
 import Parent from '../../models/Parent.js';
 import Class from '../../models/Class.js';
 import mongoose from 'mongoose';
+import Enrollment from '../../models/Enrollment.js';
 import bcrypt from 'bcryptjs';
 import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -72,47 +73,80 @@ export const getAllStudents = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPaginationParams(req);
   const { className, section, academicYear, status, search } = req.query;
   
-  const filter = { 
-    schoolId: req.schoolId  // ✅ CRITICAL MULTI-TENANT FILTER
-  };
-  
-  if (className) filter.className = className;
-  if (section) filter.section = section;
-  if (academicYear) filter.academicYear = academicYear;
-  if (status) filter.status = status;
-  
-  if (search) {
-    filter.$text = { $search: search };
+  let studentFilter = { schoolId: req.schoolId };
+  if (status) studentFilter.status = status;
+  if (search) studentFilter.$text = { $search: search };
+
+  let studentIds = null;
+  if (status || search) {
+    const matchedStudents = await Student.find(studentFilter).select('_id');
+    studentIds = matchedStudents.map(s => s._id);
   }
+
+  let enrollFilter = { schoolId: req.schoolId, status: { $ne: 'DROPPED' } };
+  if (academicYear) enrollFilter.academicYear = academicYear;
+  if (className) enrollFilter.className = className;
+  if (section) enrollFilter.section = section;
+  if (studentIds !== null) enrollFilter.student = { $in: studentIds };
   
-  const [students, total] = await Promise.all([
-    Student.find(filter)
+  const [enrollments, total] = await Promise.all([
+    Enrollment.find(enrollFilter)
+      .populate({ path: 'student', select: '-password' })
       .populate('class', 'className')
-      .select('-password')
       .sort({ rollNumber: 1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-    Student.countDocuments(filter)
+    Enrollment.countDocuments(enrollFilter)
   ]);
   
+  const students = enrollments.map(e => {
+    if (!e.student) return null;
+    return {
+      ...e.student,
+      class: e.class,
+      className: e.className,
+      section: e.section,
+      rollNumber: e.rollNumber,
+      academicYear: e.academicYear,
+      enrollmentId: e._id
+    };
+  }).filter(Boolean);
+
   return paginatedResponse(res, 'Students retrieved successfully', students, page, limit, total);
 });
 
 // Get student by ID - MULTI-TENANT
 export const getStudentById = asyncHandler(async (req, res) => {
   const { studentId } = req.params;
+  const { academicYear } = req.query;
   
   const student = await Student.findOne({ 
     _id: studentId,
     schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
   })
-    .populate('class', 'className sections')
     .select('-password')
     .lean();
   
   if (!student) {
     throw new NotFoundError('Student');
+  }
+
+  let enrollFilter = { schoolId: req.schoolId, student: studentId };
+  if (academicYear) enrollFilter.academicYear = academicYear;
+
+  const enrollment = await Enrollment.findOne(enrollFilter)
+    .sort({ academicYear: -1, createdAt: -1 })
+    .populate('class', 'className sections')
+    .lean();
+
+  if (enrollment) {
+    student.class = enrollment.class;
+    student.className = enrollment.className;
+    student.section = enrollment.section;
+    student.rollNumber = enrollment.rollNumber;
+    student.academicYear = enrollment.academicYear;
+    student.enrollmentId = enrollment._id;
   }
   
   return successResponse(res, 'Student retrieved successfully', student);
@@ -142,7 +176,7 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
     parentOccupation, parentQualification, parentIncome,
     
     // Academic Info
-    className, academicYear, previousSchool,
+    className, section, academicYear, previousSchool, rollNumber,
     
     // Medical Info
     medicalHistory, allergies, emergencyContactName, emergencyContactPhone, emergencyContactRelation,
@@ -393,12 +427,10 @@ if (dateOfBirth) {
     guardianPhone,
     guardianRelation,
     
-    // ✅ PROPER CLASS ASSIGNMENT
-    class: classDoc._id,
-    className: classDoc.className,
-    academicYear,
+    registrationYear: academicYear,
+    targetGrade: classDoc.className,
     previousSchool,
-    status: 'REGISTERED',
+    status: section ? 'ACTIVE' : 'ADMITTED',
     
     medicalHistory,
     allergies: allergies ? allergies.split(',').map(a => a.trim()) : [],
@@ -475,6 +507,25 @@ if (dateOfBirth) {
       
       await parent.save({ session });
       logger.info(`New parent created: ${parentID}`);
+    }
+
+    if (section) {
+      let nextRollNumber = rollNumber;
+      if (!nextRollNumber) {
+        const lastEnrollment = await Enrollment.findOne({ schoolId: req.schoolId, class: classDoc._id, section, academicYear }).sort({ rollNumber: -1 }).lean();
+        nextRollNumber = lastEnrollment && lastEnrollment.rollNumber ? lastEnrollment.rollNumber + 1 : 1;
+      }
+      const enrollment = new Enrollment({
+        schoolId: req.schoolId,
+        student: student._id,
+        class: classDoc._id,
+        className: classDoc.className,
+        section,
+        academicYear,
+        rollNumber: nextRollNumber,
+        status: 'ACTIVE'
+      });
+      await enrollment.save({ session });
     }
     
     await session.commitTransaction();
@@ -629,13 +680,10 @@ if (dateOfBirth) {
     motherPhone,
     motherEmail,
     address,
-    class: classDoc._id,
-    className: classDoc.className,
-    section,
-    academicYear,
-    rollNumber: rollNumber || count + 1,
+    registrationYear: academicYear,
+    targetGrade: classDoc.className,
     admissionDate: admissionDate || new Date(),
-    status: section ? 'ENROLLED' : 'REGISTERED',
+    status: section ? 'ACTIVE' : 'ADMITTED',
 
      enrollmentNumber: enrollmentNumber || undefined,
     scholarNumber: scholarNumber || undefined,
@@ -654,8 +702,24 @@ if (dateOfBirth) {
   try {
     await student.save({ session });
     
-    // Update section strength if section provided - MULTI-TENANT
     if (section) {
+      let nextRollNumber = rollNumber;
+      if (!nextRollNumber) {
+        const lastEnrollment = await Enrollment.findOne({ schoolId: req.schoolId, class: classDoc._id, section, academicYear }).sort({ rollNumber: -1 }).lean();
+        nextRollNumber = lastEnrollment && lastEnrollment.rollNumber ? lastEnrollment.rollNumber + 1 : 1;
+      }
+      const enrollment = new Enrollment({
+        schoolId: req.schoolId,
+        student: student._id,
+        class: classDoc._id,
+        className: classDoc.className,
+        section,
+        academicYear,
+        rollNumber: nextRollNumber,
+        status: 'ACTIVE'
+      });
+      await enrollment.save({ session });
+
       const sectionData = classDoc.sections.find(s => s.sectionName === section);
       if (sectionData) {
         sectionData.currentStrength += 1;
@@ -759,6 +823,12 @@ export const deleteStudent = asyncHandler(async (req, res) => {
       { $pull: { children: studentId } },
       { session }
     );
+
+    await Enrollment.updateMany(
+      { student: studentId, schoolId: req.schoolId },
+      { status: 'DROPPED' },
+      { session }
+    );
     
     student.isDeleted = true;
     student.deletedAt = new Date();
@@ -830,8 +900,8 @@ export const updateStudentStatus = asyncHandler(async (req, res) => {
   const { studentId } = req.params;
   const { status } = req.body;
   
-  if (!['REGISTERED', 'ENROLLED', 'SUSPENDED', 'WITHDRAWN', 'GRADUATED', 'TRANSFERRED'].includes(status)) {
-    throw new ValidationError('Invalid status');
+  if (!['APPLICANT', 'ADMITTED', 'ACTIVE', 'ALUMNI', 'WITHDRAWN'].includes(status)) {
+    throw new ValidationError('Invalid status. Expected APPLICANT, ADMITTED, ACTIVE, ALUMNI, or WITHDRAWN.');
   }
   
   const student = await Student.findOneAndUpdate(
@@ -866,22 +936,43 @@ export const promoteStudents = asyncHandler(async (req, res) => {
     throw new NotFoundError('Target class');
   }
   
-  const updatedStudents = await Student.updateMany(
+  await Student.updateMany(
     { 
       _id: { $in: studentIds },
       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
     },
-    {
+    { status: 'ACTIVE' }
+  );
+
+  await Enrollment.updateMany(
+    { student: { $in: studentIds }, schoolId: req.schoolId, status: 'ACTIVE' },
+    { status: 'PROMOTED' }
+  );
+
+  const lastEnrollment = await Enrollment.findOne({
+    schoolId: req.schoolId, class: targetClassId, section: targetSection, academicYear: targetAcademicYear
+  }).sort({ rollNumber: -1 }).lean();
+  
+  let nextRollNumber = lastEnrollment && lastEnrollment.rollNumber ? lastEnrollment.rollNumber + 1 : 1;
+
+  const enrollmentDocs = studentIds.map(studentId => {
+    const doc = {
+      schoolId: req.schoolId,
+      student: studentId,
       class: targetClassId,
       className: targetClass.className,
       section: targetSection,
       academicYear: targetAcademicYear,
-      status: 'ENROLLED'
+      rollNumber: nextRollNumber++,
+      status: 'ACTIVE'
     }
-  );
+    return doc;
+  });
   
-  return successResponse(res, `Successfully promoted ${updatedStudents.modifiedCount} students`, {
-    promoted: updatedStudents.modifiedCount
+  await Enrollment.insertMany(enrollmentDocs);
+  
+  return successResponse(res, `Successfully promoted ${studentIds.length} students`, {
+    promoted: studentIds.length
   });
 });
 

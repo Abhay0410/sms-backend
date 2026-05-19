@@ -25,7 +25,6 @@ const studentSchema = new mongoose.Schema({
   enrollmentNumber: { type: String, trim: true },
   scholarNumber: { type: String, trim: true },
 
-  rollNumber: { type: Number },
   dateOfBirth: { type: Date },
   phone: { type: String }, 
   lastLogin: { type: Date },
@@ -76,10 +75,8 @@ motherQualification: String,
   guardianEmail: String,
   
   // Academic Info
-  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class' },
-  className: { type: String, required: true },
-  section: { type: String },
-  academicYear: { type: String, required: true },
+  registrationYear: { type: String, required: true },
+  targetGrade: { type: String },
   admissionDate: { type: Date, default: Date.now },
   admissionNumber: String,
   previousSchool: String,
@@ -87,8 +84,8 @@ motherQualification: String,
   // Status
   status: { 
     type: String, 
-    enum: ['REGISTERED', 'ENROLLED', 'SUSPENDED', 'WITHDRAWN', 'GRADUATED', 'TRANSFERRED'], 
-    default: 'REGISTERED' 
+    enum: ['APPLICANT', 'ADMITTED', 'ACTIVE', 'ALUMNI', 'WITHDRAWN'], 
+    default: 'APPLICANT' 
   },
   
   // Medical Info
@@ -144,8 +141,8 @@ studentSchema.index(
   { unique: true, sparse: true }
 );
 
-studentSchema.index({ schoolId: 1, class: 1, section: 1 });
-studentSchema.index({ schoolId: 1, academicYear: 1, status: 1 });
+studentSchema.index({ schoolId: 1, targetGrade: 1 });
+studentSchema.index({ schoolId: 1, registrationYear: 1, status: 1 });
 
 // ✅ TEXT INDEX FOR SEARCH OPTIMIZATION
 studentSchema.index(

@@ -1,6 +1,7 @@
 // controllers/auth/student.auth.controller.js - MULTI-TENANT VERSION (UPDATED)
 import bcrypt from "bcryptjs";
 import Student from "../../models/Student.js";
+import Enrollment from "../../models/Enrollment.js";
 import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
@@ -26,11 +27,6 @@ const safeStudent = (student) => {
     nationality: obj.nationality,
     address: obj.address,
     profilePicture: obj.profilePicture,
-    profilePicturePublicId: obj.profilePicturePublicId,
-    className: obj.className,
-    section: obj.section,
-    rollNumber: obj.rollNumber,
-    class: obj.class,
     parent: obj.parent,
     status: obj.status,
     role: obj.role,
@@ -45,7 +41,14 @@ const safeStudent = (student) => {
     busRoute: obj.busRoute,
     pickupPoint: obj.pickupPoint,
     createdAt: obj.createdAt,
-    updatedAt: obj.updatedAt
+    updatedAt: obj.updatedAt,
+    // These fields will be added dynamically from the Enrollment record
+    className: obj.className,
+    section: obj.section,
+    rollNumber: obj.rollNumber,
+    class: obj.class,
+    academicYear: obj.academicYear,
+    enrollmentId: obj.enrollmentId
   };
 };
 
@@ -61,7 +64,7 @@ export const login = asyncHandler(async (req, res) => {
   const student = await Student.findOne({ 
     studentID, 
     schoolId // This ensures student can only login to their own school
-  }).select("+password");
+  }).select("+password").lean();
   
   if (!student) {
     throw new AuthenticationError("Invalid credentials for this institution.");
@@ -88,9 +91,19 @@ export const login = asyncHandler(async (req, res) => {
     throw new AuthenticationError("Unauthorized access to this institution.");
   }
 
+  // ✅ NEW: Fetch current enrollment data
+  const enrollment = await Enrollment.findOne({
+    student: student._id,
+    schoolId: student.schoolId,
+    status: 'ACTIVE'
+  }).lean();
+
+  // Merge data for the response
+  const fullProfile = { ...student };
+  if (enrollment) Object.assign(fullProfile, { ...enrollment });
+
   // Update last login
-  student.lastLogin = new Date();
-  await student.save();
+  await Student.updateOne({ _id: student._id }, { lastLogin: new Date() });
 
   // ✅ MULTI-TENANT: Include schoolId in JWT payload
   const token = signToken({ 
@@ -110,8 +123,6 @@ export const login = asyncHandler(async (req, res) => {
   console.log("🔐 Student login successful:", {
     studentID: student.studentID,
     schoolId: student.schoolId,
-    className: student.className,
-    section: student.section,
     ip: req.ip,
     timestamp: new Date().toISOString()
   });
@@ -120,7 +131,7 @@ export const login = asyncHandler(async (req, res) => {
     token,
     role: "student",
     schoolId: student.schoolId,
-    student: safeStudent(student),
+    student: safeStudent(fullProfile),
   });
 });
 
@@ -131,15 +142,28 @@ export const getProfile = asyncHandler(async (req, res) => {
     schoolId: req.schoolId // ✅ Verify school match
   })
     .select('-password')
-    .populate('class', 'className sections')
-    .populate('parent', 'name parentID phone email');
+    .populate('parent', 'name parentID phone email')
+    .lean();
   
   if (!student) {
     throw new NotFoundError("Student not found in this institution");
   }
 
+  // ✅ NEW: Fetch current enrollment data
+  const enrollment = await Enrollment.findOne({
+    student: student._id,
+    schoolId: req.schoolId,
+    status: 'ACTIVE'
+  })
+  .populate('class', 'className sections')
+  .lean();
+
+  // Merge data for the response
+  const fullProfile = { ...student };
+  if (enrollment) Object.assign(fullProfile, { ...enrollment });
+
   return successResponse(res, "Profile retrieved successfully", {
-    student: safeStudent(student),
+    student: safeStudent(fullProfile),
   });
 });
 
@@ -282,15 +306,28 @@ export const validateToken = asyncHandler(async (req, res) => {
     schoolId: req.schoolId // ✅ Verify school match
   })
     .select('-password')
-    .populate('class', 'className sections')
-    .populate('parent', 'name parentID');
+    .populate('parent', 'name parentID')
+    .lean();
   
   if (!student) {
     throw new NotFoundError("Student not found in this institution");
   }
   
+  // ✅ NEW: Fetch current enrollment data
+  const enrollment = await Enrollment.findOne({
+    student: student._id,
+    schoolId: req.schoolId,
+    status: 'ACTIVE'
+  })
+  .populate('class', 'className sections')
+  .lean();
+
+  // Merge data for the response
+  const fullProfile = { ...student };
+  if (enrollment) Object.assign(fullProfile, { ...enrollment });
+
   return successResponse(res, "Token is valid", {
-    student: safeStudent(student)
+    student: safeStudent(fullProfile)
   });
 });
 
@@ -315,15 +352,28 @@ export const getStudentById = asyncHandler(async (req, res) => {
     schoolId: req.schoolId // ✅ Ensure student belongs to same school
   })
     .select('-password')
-    .populate('class', 'className sections')
-    .populate('parent', 'name parentID phone email');
+    .populate('parent', 'name parentID phone email')
+    .lean();
   
   if (!student) {
     throw new NotFoundError("Student not found in this institution");
   }
   
+  // ✅ NEW: Fetch current enrollment data
+  const enrollment = await Enrollment.findOne({
+    student: student._id,
+    schoolId: req.schoolId,
+    status: 'ACTIVE'
+  })
+  .populate('class', 'className sections')
+  .lean();
+
+  // Merge data for the response
+  const fullProfile = { ...student };
+  if (enrollment) Object.assign(fullProfile, { ...enrollment });
+
   return successResponse(res, "Student retrieved successfully", {
-    student: safeStudent(student),
+    student: safeStudent(fullProfile),
   });
 });
 

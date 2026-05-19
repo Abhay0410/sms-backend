@@ -1,6 +1,7 @@
 // controllers/auth/parent.auth.controller.js - MULTI-TENANT VERSION (UPDATED)
 import bcrypt from "bcryptjs";
 import Parent from "../../models/Parent.js";
+import Enrollment from "../../models/Enrollment.js";
 import { signToken } from "../../utils/jwt.js";
 import { successResponse } from "../../utils/response.js";
 import { asyncHandler } from "../../middleware/errorHandler.js";
@@ -48,7 +49,7 @@ export const login = asyncHandler(async (req, res) => {
     schoolId // This ensures parent can only login to their own school
   })
     .select("+password")
-    .populate('children', 'name studentID className section status  profilePicture schoolId');
+    .populate('children', 'name studentID status profilePicture schoolId');
   
   if (!parent) {
     throw new AuthenticationError("Invalid credentials for this institution.");
@@ -72,6 +73,28 @@ export const login = asyncHandler(async (req, res) => {
   parent.lastLogin = new Date();
   await parent.save();
 
+  // ✅ NEW: Enrich children with their current enrollment data
+  const childrenIds = (parent.children || []).map(child => child._id);
+  const enrollments = await Enrollment.find({
+    student: { $in: childrenIds },
+    schoolId: parent.schoolId,
+    status: 'ACTIVE'
+  }).lean();
+  const enrollmentMap = new Map();
+  enrollments.forEach(e => enrollmentMap.set(e.student.toString(), e));
+
+  const enrichedChildren = (parent.children || []).map(child => {
+    const enrollment = enrollmentMap.get(child._id.toString());
+    const childObj = child.toObject();
+    if (enrollment) {
+      childObj.className = enrollment.className;
+      childObj.section = enrollment.section;
+      childObj.rollNumber = enrollment.rollNumber;
+      childObj.academicYear = enrollment.academicYear;
+    }
+    return childObj;
+  });
+
   // ✅ Include schoolId in JWT payload for multi-tenancy
   const token = signToken({ 
     id: parent._id.toString(), 
@@ -93,7 +116,7 @@ export const login = asyncHandler(async (req, res) => {
     role: "parent",
     schoolId: parent.schoolId,
     requiresPasswordChange: parent.requiresPasswordChange || false,
-    parent: safeParent(parent),
+    parent: safeParent({ ...parent.toObject(), children: enrichedChildren }),
   });
 });
 
@@ -102,7 +125,7 @@ export const validate = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
     schoolId: req.schoolId // ✅ Verify school match
-  }).populate('children', 'name studentID className section status profilePicture');
+  }).populate('children', 'name studentID status profilePicture');
   
   if (!parent) {
     throw new NotFoundError("Parent not found in this institution");
@@ -124,7 +147,7 @@ export const profile = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
     schoolId: req.schoolId // ✅ Verify school match
-  }).populate('children', 'name studentID className section status rollNumber email phone profilePicture');
+  }).populate('children', 'name studentID status rollNumber email phone profilePicture schoolId');
   
   if (!parent) {
     throw new NotFoundError("Parent not found in this institution");
@@ -140,20 +163,38 @@ export const getChildren = asyncHandler(async (req, res) => {
   const parent = await Parent.findOne({
     _id: req.user.id,
     schoolId: req.schoolId // ✅ Verify school match
-  }).populate({
-    path: 'children',
-    select: 'name studentID className section status rollNumber email phone profilePicture academicYear schoolId',
-    match: { schoolId: req.schoolId } // ✅ Ensure children belong to same school
-  });
+  })
+  .populate({
+      path: 'children',
+      select: 'name studentID status email phone profilePicture schoolId',
+      match: { schoolId: req.schoolId }
+  })
+  .lean();
 
   if (!parent) {
     throw new NotFoundError("Parent not found in this institution");
   }
 
-  // Filter out any children that might not belong to this school
-  const children = (parent.children || []).filter(child => 
-    child && child.schoolId && child.schoolId.toString() === req.schoolId.toString()
-  );
+  const childrenIds = (parent.children || []).map(child => child._id);
+
+  const enrollments = await Enrollment.find({
+    student: { $in: childrenIds },
+    schoolId: req.schoolId,
+    status: 'ACTIVE'
+  }).lean();
+  const enrollmentMap = new Map();
+  enrollments.forEach(e => enrollmentMap.set(e.student.toString(), e));
+
+  const children = (parent.children || []).map(child => {
+    const enrollment = enrollmentMap.get(child._id.toString());
+    if (enrollment) {
+      child.className = enrollment.className;
+      child.section = enrollment.section;
+      child.rollNumber = enrollment.rollNumber;
+      child.academicYear = enrollment.academicYear;
+    }
+    return child;
+  });
 
   return successResponse(res, "Children retrieved successfully", {
     children,

@@ -546,6 +546,43 @@ export const getClassStatistics = asyncHandler(async (req, res) => {
   return successResponse(res, 'Statistics retrieved successfully', updatedClasses);
 });
 
+
+export const updateSection = asyncHandler(async (req, res) => {
+  const { classId, sectionName } = req.params;
+  const { sectionName: newSectionName, capacity } = req.body;
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  const section = classData.sections.find(s => s.sectionName === sectionName);
+  if (!section) throw new NotFoundError('Section');
+
+  if (newSectionName) section.sectionName = newSectionName.toUpperCase();
+  if (capacity !== undefined) section.capacity = Number(capacity);
+
+  await classData.save();
+  return successResponse(res, 'Section updated successfully', classData);
+});
+
+export const deleteSection = asyncHandler(async (req, res) => {
+  const { classId, sectionName } = req.params;
+
+  const classData = await Class.findOne({ _id: classId, schoolId: req.schoolId });
+  if (!classData) throw new NotFoundError('Class');
+
+  const section = classData.sections.find(s => s.sectionName === sectionName);
+  if (!section) throw new NotFoundError('Section');
+
+  if (section.currentStrength > 0) {
+    throw new ValidationError('Cannot delete section with enrolled students');
+  }
+
+  classData.sections = classData.sections.filter(s => s.sectionName !== sectionName);
+  await classData.save();
+
+  return successResponse(res, 'Section deleted successfully', classData);
+});
+
 export default {
   getAllClasses,
   getClasses,
@@ -561,4 +598,6 @@ export default {
   updateClassFeeStructure,
   shiftStudentSection,
   getClassStatistics,
+  updateSection,
+  deleteSection,
 };

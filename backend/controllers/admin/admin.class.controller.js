@@ -298,18 +298,26 @@ export const promoteStudents = asyncHandler(async (req, res) => {
     enrollment.status = 'PROMOTED';
     await enrollment.save();
 
-    await Enrollment.create({
-      schoolId: req.schoolId,
-      student: enrollment.student,
-      class: targetClassId,
-      className: targetClass.className,
-      section: targetSection || '',
-      academicYear: academicYear,
-      rollNumber: targetSection ? nextRollNumber++ : null,
-      status: 'ACTIVE'
-    });
-    
-    await Student.updateOne({ _id: enrollment.student }, { status: 'ACTIVE' });
+    if (targetSection) {
+      await Enrollment.create({
+        schoolId: req.schoolId,
+        student: enrollment.student,
+        class: targetClassId,
+        className: targetClass.className,
+        section: targetSection,
+        academicYear: academicYear,
+        rollNumber: nextRollNumber++,
+        status: 'ACTIVE'
+      });
+      await Student.updateOne({ _id: enrollment.student }, { status: 'ACTIVE' });
+    } else {
+      // Push back to admission pool waiting for section assignment
+      await Student.updateOne({ _id: enrollment.student }, { 
+        status: 'ADMITTED', 
+        targetGrade: targetClass.className, 
+        registrationYear: academicYear 
+      });
+    }
   });
   
   await Promise.all(promotePromises);

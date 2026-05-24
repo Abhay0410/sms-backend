@@ -327,11 +327,6 @@ export const promoteStudents = asyncHandler(async (req, res) => {
     throw new ValidationError('No students found to promote');
   }
   
-  await Student.updateMany(
-    { _id: { $in: studentsToPromote }, schoolId: req.schoolId },
-    { status: 'ACTIVE' }
-  );
-
   await Enrollment.updateMany(
     { student: { $in: studentsToPromote }, schoolId: req.schoolId, status: 'ACTIVE' },
     { status: 'PROMOTED' }
@@ -344,29 +339,40 @@ export const promoteStudents = asyncHandler(async (req, res) => {
   let nextRollNumber = lastEnrollment && lastEnrollment.rollNumber ? lastEnrollment.rollNumber + 1 : 1;
   
   if (targetSection) {
+    await Student.updateMany(
+      { _id: { $in: studentsToPromote }, schoolId: req.schoolId },
+      { status: 'ACTIVE' }
+    );
+
     // Update target section strength
     const targetSectionData = targetClass.sections.find(s => s.sectionName === targetSection);
     if (targetSectionData) {
       targetSectionData.currentStrength += studentsToPromote.length;
       await targetClass.save();
     }
+  
+    const enrollmentDocs = studentsToPromote.map(studentId => {
+      const doc = {
+        schoolId: req.schoolId,
+        student: studentId,
+        class: targetClassId,
+        className: targetClass.className,
+        section: targetSection,
+        academicYear: targetAcademicYear,
+        rollNumber: nextRollNumber++,
+        status: 'ACTIVE'
+      }
+      return doc;
+    });
+  
+    await Enrollment.insertMany(enrollmentDocs);
+  } else {
+    // If no section is provided, push them to the admissions pool
+    await Student.updateMany(
+      { _id: { $in: studentsToPromote }, schoolId: req.schoolId },
+      { status: 'ADMITTED', targetGrade: targetClass.className, registrationYear: targetAcademicYear }
+    );
   }
-  
-  const enrollmentDocs = studentsToPromote.map(studentId => {
-    const doc = {
-      schoolId: req.schoolId,
-      student: studentId,
-      class: targetClassId,
-      className: targetClass.className,
-      section: targetSection,
-      academicYear: targetAcademicYear,
-      rollNumber: nextRollNumber++,
-      status: 'ACTIVE'
-    }
-    return doc;
-  });
-  
-  await Enrollment.insertMany(enrollmentDocs);
   
   return successResponse(res, `Successfully promoted ${studentsToPromote.length} students`, {
     promotedCount: studentsToPromote.length,

@@ -15,6 +15,8 @@ import {
   getAcademicYears,
   updateClassFeeStructure,
   getClassStatistics, // 👈 Add this import
+  updateSection,
+  deleteSection,
 } from "../../controllers/admin/admin.class.controller.js";
 
 const router = Router();
@@ -30,6 +32,10 @@ router.get("/academic-years", requireAuth(["admin"]), getAcademicYears);
 
 // Section management
 router.post("/:classId/section", requireAuth(["admin"]), addSection);
+
+router.put("/:classId/section/:sectionName", requireAuth(["admin"]), updateSection);
+router.delete("/:classId/section/:sectionName", requireAuth(["admin"]), deleteSection);
+
 router.put("/:classId/section/:sectionName/assign-students", requireAuth(["admin"]), assignStudentsToSection);
 router.put("/:classId/shift-student", requireAuth(["admin"]), shiftStudentSection);
 

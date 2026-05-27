@@ -4,10 +4,12 @@ import {
   returnBook, getLibraryStats,getActiveIssues,getRecentTransactions 
 } from '../../controllers/admin/admin.library.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { requireModule } from '../../middleware/featureGate.js';
 
 const router = express.Router();
 
 router.use(requireAuth(['admin'])); 
+router.use(requireModule('LIBRARY'));
 
 router.post('/books', addBook);
 router.get('/inventory', getInventory);

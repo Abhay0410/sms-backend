@@ -338,7 +338,7 @@ const createClassesForSchool = async (schoolId, academicYear = '2025-2026') => {
 
 export const registerSchool = async (req, res) => {
   try {
-    const { schoolName, schoolCode, adminDetails, academicYear = '2025-2026' } = req.body;
+    const { schoolName, schoolCode, subdomain, adminDetails, academicYear = '2025-2026' } = req.body;
     
     // 1. Validate schoolCode unique
     const existingSchool = await School.findOne({ 
@@ -355,9 +355,13 @@ export const registerSchool = async (req, res) => {
     const school = await School.create({
       schoolName,
       schoolCode,
+      subdomain: subdomain ? subdomain.toLowerCase() : undefined,
       adminEmail: adminDetails.email,
       phone: adminDetails.phone,
-      address: adminDetails.address,
+      address: {
+        city: adminDetails.address?.city || 'Pending',
+        state: adminDetails.address?.state || 'Pending'
+      },
       setupCompleted: false
     });
 

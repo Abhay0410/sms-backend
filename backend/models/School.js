@@ -16,7 +16,15 @@ const schoolSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   subscriptionPlan: { type: String, default: 'BASIC' },
   maxStudents: { type: Number, default: 1000 },
-  setupCompleted: { type: Boolean, default: false }
+  setupCompleted: { type: Boolean, default: false },
+  
+  // SaaS / Multi-Tenant Fields
+  subdomain: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
+  status: { type: String, enum: ['ACTIVE', 'SUSPENDED', 'PENDING'], default: 'PENDING' },
+  subscription: { type: mongoose.Schema.Types.ObjectId, ref: 'SubscriptionPlan' },
+  trialEndsAt: { type: Date },
+  modulesEnabled: [{ type: String }],
+  storageUsed: { type: Number, default: 0 }
 }, { timestamps: true });
 
 schoolSchema.index({ isActive: 1 });

@@ -26,11 +26,16 @@ export const login = asyncHandler(async (req, res) => {
   // ✅ Validated via Zod
   const { adminID, password, schoolId } = adminLoginSchema.parse(req.body);
 
-  // ✅ FIX: Query MUST include schoolId to ensure tenant isolation
-  const admin = await Admin.findOne({ 
-    adminID, 
-    schoolId // This ensures admin can only login to their own school
-  }).select("+password").lean();
+  // ✅ FIX: Allow admin to log in using EITHER their email OR their adminID
+  const query = { schoolId };
+  if (adminID.includes('@')) {
+    query.email = adminID.toLowerCase().trim();
+  } else {
+    query.adminID = adminID.trim();
+  }
+
+  // Query MUST include schoolId to ensure tenant isolation
+  const admin = await Admin.findOne(query).select("+password").lean();
   
   if (!admin) {
     throw new AuthenticationError("Invalid credentials for this institution.");

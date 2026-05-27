@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { AuthenticationError } from "../utils/errors.js";
 // ✅ Import the getter function from your central utility
 import { getJWTConfig } from "../utils/jwt.js";
+import { subscriptionCheck } from "./subscriptionCheck.js";
 import logger from "../utils/logger.js";
 
 export const requireAuth = (allowedRoles = []) => {
@@ -67,7 +68,9 @@ export const requireAuth = (allowedRoles = []) => {
         role: req.user.role,
         isSuperAdmin: req.user.isSuperAdmin
       });
-      next();
+      
+      // ✅ MULTI-TENANT: Verify SaaS Subscription Status before proceeding
+      return subscriptionCheck(req, res, next);
     } catch (error) {
       console.log("  ❌ Auth failed:", error.message);
 

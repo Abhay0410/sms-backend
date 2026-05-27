@@ -10,11 +10,13 @@ import {
   getConsumptionReport
 } from '../../controllers/admin/admin.inventory.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { requireModule } from '../../middleware/featureGate.js';
 
 const router = express.Router();
 
 // Protect all routes
 router.use(requireAuth(['admin']));
+router.use(requireModule('INVENTORY'));
 
 // --- Master Items Management ---
 router.post('/items', addInventoryItem);

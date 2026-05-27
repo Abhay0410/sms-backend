@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
+import { requireModule } from "../../middleware/featureGate.js";
 import {
   addVehicle,
   getVehicles,
@@ -20,6 +21,7 @@ const router = Router();
 
 // Protect all transport routes - strictly Admin only
 router.use(requireAuth(["admin"]));
+router.use(requireModule("TRANSPORT"));
 
 // ==========================================
 // 1. VEHICLES

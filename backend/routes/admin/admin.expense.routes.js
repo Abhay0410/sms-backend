@@ -8,11 +8,13 @@ import {
   deleteManualExpense
 } from '../../controllers/admin/admin.expense.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { requireModule } from '../../middleware/featureGate.js';
 
 const router = express.Router();
 
 // Protect all routes (assuming 'admin' handles these operations)
 router.use(requireAuth(['admin']));
+router.use(requireModule('EXPENSE'));
 
 // --- Expense Categories ---
 router.post('/categories', addExpenseCategory);

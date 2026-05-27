@@ -1,0 +1,67 @@
+SUPER ADMIN & SAAS PLATFORM - IMPLEMENTATION PLAN
+=================================================
+
+OVERVIEW
+--------
+This plan outlines the architecture and steps to upgrade the current Multi-Tenant School Management System into a full SaaS platform. A new "Super Admin" layer will sit above the tenants (schools) to manage onboarding, billing, subscriptions, limits, and global analytics.
+
+1. ARCHITECTURAL ISOLATION
+--------------------------
+To maintain high security and keep the codebase clean, the Super Admin module will be strictly isolated from the tenant (school) logic:
+- Namespace: All Super Admin APIs will be prefixed with `/api/superadmin`.
+- Authentication: A dedicated `SuperAdmin` model with its own JWT generation and a strict `isSuperAdmin` middleware.
+- Routing: Grouped entirely under `routes/superadmin/` and `controllers/superadmin/`.
+
+2. DATABASE SCHEMA ADDITIONS
+----------------------------
+A. Super Admin Model (`models/SuperAdmin.js`)
+   - Fields: name, email, password, role (superadmin/support), isActive, lastLogin.
+
+B. Subscription Plan Model (`models/SubscriptionPlan.js`)
+   - Fields: name (Basic/Pro/Enterprise), monthlyPrice, yearlyPrice, limits (maxStudents, maxStorageMB), features ([TRANSPORT, PAYROLL, INVENTORY]).
+
+C. Modifications to `models/School.js`
+   - Add fields: subdomain, status (ACTIVE/SUSPENDED/PENDING), subscription (Ref to Plan), trialEndsAt, modulesEnabled, storageUsed.
+
+3. SECURITY & MIDDLEWARE
+------------------------
+A. `superAdminAuth.js`: Validates the Super Admin JWT and ensures role is 'superadmin'.
+B. `subscriptionCheck.js`: Global middleware for tenant routes. Blocks access if a school's subscription status is 'PAST_DUE' or 'SUSPENDED'.
+C. `featureGate.js`: Route-specific middleware (e.g., `requireModule('TRANSPORT')`) to block schools on lower-tier plans from accessing premium APIs.
+
+4. CORE FEATURES & API DESIGN
+-----------------------------
+A. Authentication (`superadmin.auth.controller.js`)
+   - Login, Password Reset, Profile.
+
+B. Tenant/School Management (`superadmin.school.controller.js`)
+   - Manually provision/register a new school.
+   - List all schools with pagination, search, and global filters.
+   - Suspend/Activate a school (e.g., for non-payment).
+   - Tenant Impersonation (Generate a temporary token to log in as a School Admin for support purposes).
+
+C. Subscription & Plan Management (`superadmin.plan.controller.js`)
+   - Create, Update, and List SaaS plans.
+   - Upgrade/Downgrade a specific school's plan.
+
+D. Global Analytics (`superadmin.metrics.controller.js`)
+   - Aggregated stats: Total Schools, Total Active Students across the platform, Monthly Recurring Revenue (MRR), Resource usage (Storage/API calls).
+
+5. EXECUTION PHASES
+-------------------
+PHASE 1 (Foundation): 
+- Create Models (`SuperAdmin`, `SubscriptionPlan`).
+- Update `School` model with SaaS fields.
+- Build `superAdminAuth` middleware and Auth controllers.
+
+PHASE 2 (Tenant Control):
+- Build School CRUD endpoints in the Super Admin namespace.
+- Implement `subscriptionCheck` middleware and apply it to existing `server.js` tenant routes.
+
+PHASE 3 (Monetization & Limits):
+- Build Plan CRUD endpoints.
+- Implement `featureGate` middleware to lock down premium modules (Transport, Inventory, etc.).
+
+PHASE 4 (Support & Analytics):
+- Build Global Metrics dashboard endpoints.
+- Build the Tenant Impersonation feature for seamless customer support.

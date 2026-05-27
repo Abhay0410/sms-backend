@@ -19,6 +19,10 @@ import { errorHandler } from "./middleware/errorHandler.js";
 
 // Import routes
 import schoolRoutes from './routes/school/school.routes.js';
+import superAdminAuthRoutes from "./routes/superadmin/superadmin.auth.routes.js";
+import superAdminSchoolRoutes from "./routes/superadmin/superadmin.school.routes.js";
+import superAdminPlanRoutes from "./routes/superadmin/superadmin.plan.routes.js";
+import superAdminMetricsRoutes from "./routes/superadmin/superadmin.metrics.routes.js";
 import adminRoutes from "./routes/admin/admin.registration.routes.js";
 import adminAuthRoutes from "./routes/auth/admin.auth.routes.js";
 import teacherAuthRoutes from "./routes/auth/teacher.auth.routes.js";
@@ -203,6 +207,10 @@ app.get("/health", (req, res) => res.json({ status: "up", env: process.env.NODE_
 // Route Registration
 app.use('/api/schools', schoolRoutes);
 app.use("/api/session", sessionRoutes);
+app.use("/api/superadmin/auth", superAdminAuthRoutes);
+app.use("/api/superadmin/schools", superAdminSchoolRoutes);
+app.use("/api/superadmin/plans", superAdminPlanRoutes);
+app.use("/api/superadmin/metrics", superAdminMetricsRoutes);
 app.use("/api/auth/admin", adminAuthRoutes);
 app.use("/api/auth/teacher", teacherAuthRoutes);
 app.use("/api/auth/student", studentAuthRoutes);

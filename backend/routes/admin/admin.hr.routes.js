@@ -6,19 +6,24 @@ import {
     getMonthlyAttendanceReport,
     updateStaffAttendance,getAllLeaves
 } from "../../controllers/admin/admin.hr.controller.js";
+import { requireModule } from "../../middleware/featureGate.js";
 
 
 const router = Router();
 
+// Authenticate FIRST to set req.schoolId
+router.use(requireAuth(["admin"]));
+router.use(requireModule("HR"));
+
 // Attendance Monitoring
-router.get("/attendance", requireAuth(["admin"]), getAllStaffAttendance);
-router.put("/attendance/:attendanceId", requireAuth(["admin"]), updateStaffAttendance);
-router.get("/attendance/report", requireAuth(["admin"]), getMonthlyAttendanceReport);
+router.get("/attendance", getAllStaffAttendance);
+router.put("/attendance/:attendanceId", updateStaffAttendance);
+router.get("/attendance/report", getMonthlyAttendanceReport);
 
 // Leave Management
-router.get("/leaves", requireAuth(["admin"]), getAllLeaves); 
+router.get("/leaves", getAllLeaves); 
 
-router.put("/leaves/:leaveId/process", requireAuth(["admin"]), processLeaveRequest);
+router.put("/leaves/:leaveId/process", processLeaveRequest);
 
 
 

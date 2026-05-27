@@ -10,7 +10,8 @@ export const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
  * Sign a JWT token
  */
 export const signToken = (payload) => {
-  if (!payload.id || !payload.role || !payload.schoolId) {
+  // Allow Super Admins to bypass the schoolId requirement
+  if (!payload.id || !payload.role || (!payload.schoolId && !payload.isSuperAdmin)) {
     logger.error("Missing required payload fields for JWT", { payload });
     throw new Error("Invalid payload for JWT token");
   }
@@ -39,7 +40,8 @@ export const verifyToken = (token) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     
     // Validate decoded payload structure
-    if (!decoded.id || !decoded.role || !decoded.schoolId) {
+    // Allow Super Admins to bypass the schoolId requirement
+    if (!decoded.id || !decoded.role || (!decoded.schoolId && !decoded.isSuperAdmin)) {
       throw new Error("Invalid token structure");
     }
     

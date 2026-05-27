@@ -66,6 +66,7 @@ import adminTransportRoutes from "./routes/admin/admin.transport.routes.js";
 import adminExpenseRoutes from "./routes/admin/admin.expense.routes.js";
 import adminInventoryRoutes from "./routes/admin/admin.inventory.routes.js";
 import sessionRoutes from "./routes/session/session.routes.js";
+import publicRoutes from "./routes/public/contact.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -207,6 +208,7 @@ app.get("/health", (req, res) => res.json({ status: "up", env: process.env.NODE_
 // Route Registration
 app.use('/api/schools', schoolRoutes);
 app.use("/api/session", sessionRoutes);
+app.use("/api/public", publicRoutes);
 app.use("/api/superadmin/auth", superAdminAuthRoutes);
 app.use("/api/superadmin/schools", superAdminSchoolRoutes);
 app.use("/api/superadmin/plans", superAdminPlanRoutes);

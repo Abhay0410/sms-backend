@@ -8,11 +8,13 @@ import {
   createStudentWithParent, // ✅ Add this
   updateStudent,
   deleteStudent,
-
+changeStudentPassword,
   updateStudentStatus,
   promoteStudents
 } from "../../controllers/admin/admin.student.controller.js";
 import { upload } from "../../middleware/upload.js";
+
+
 
 const router = Router();
 
@@ -27,7 +29,7 @@ router.get("/:studentId", getStudentById);
 // ✅ TWO CREATE ENDPOINTS
 router.post("/", createStudent); // Simple create
 router.post("/with-parent", createStudentWithParent); // ✅ Full registration
-
+router.put("/:studentId/change-password", changeStudentPassword);
 router.put("/:studentId",upload.single("profilePicture"), updateStudent);
 router.delete("/:studentId", deleteStudent);
 // router.post("/bulk-upload", bulkUploadStudents);

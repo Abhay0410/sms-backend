@@ -69,52 +69,189 @@ async function findClassByName(className, academicYear, schoolId) {
 }
 
 // Get all students - MULTI-TENANT
+// export const getAllStudents = asyncHandler(async (req, res) => {
+//   const { page, limit, skip } = getPaginationParams(req);
+//   const { className, section, academicYear, status, search } = req.query;
+  
+//   let studentFilter = { schoolId: req.schoolId };
+//   if (status) studentFilter.status = status;
+//   if (search) studentFilter.$text = { $search: search };
+
+//   let studentIds = null;
+//   if (status || search) {
+//     const matchedStudents = await Student.find(studentFilter).select('_id');
+//     studentIds = matchedStudents.map(s => s._id);
+//   }
+
+//   let enrollFilter = { schoolId: req.schoolId, status: { $ne: 'DROPPED' } };
+//   if (academicYear) enrollFilter.academicYear = academicYear;
+//   if (className) enrollFilter.className = className;
+//   if (section) enrollFilter.section = section;
+//   if (studentIds !== null) enrollFilter.student = { $in: studentIds };
+  
+//   const [enrollments, total] = await Promise.all([
+//     Enrollment.find(enrollFilter)
+//       .populate({ path: 'student', select: '-password' })
+//       .populate('class', 'className')
+//       .sort({ rollNumber: 1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .lean(),
+//     Enrollment.countDocuments(enrollFilter)
+//   ]);
+  
+//   const students = enrollments.map(e => {
+//     if (!e.student) return null;
+//     return {
+//       ...e.student,
+//       class: e.class,
+//       className: e.className,
+//       section: e.section,
+//       rollNumber: e.rollNumber,
+//       academicYear: e.academicYear,
+//       enrollmentId: e._id
+//     };
+//   }).filter(Boolean);
+
+//   return paginatedResponse(res, 'Students retrieved successfully', students, page, limit, total);
+// });
+
+// export const getAllStudents = asyncHandler(async (req, res) => {
+//   const { page, limit, skip } = getPaginationParams(req);
+//   const { className, section, academicYear, status, search } = req.query;
+
+//   const filter = {
+//     schoolId: req.schoolId,
+//   };
+
+//   if (status) filter.status = status;
+//   if (search) {
+//     filter.$or = [
+//       { name: { $regex: search, $options: "i" } },
+//       { studentID: { $regex: search, $options: "i" } },
+//       { email: { $regex: search, $options: "i" } },
+//       { mobileNumber: { $regex: search, $options: "i" } },
+//       { fatherName: { $regex: search, $options: "i" } },
+//     ];
+//   }
+
+//   const [students, total] = await Promise.all([
+//     Student.find(filter)
+//       .select("-password")
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .lean(),
+//     Student.countDocuments(filter),
+//   ]);
+
+//   const studentIds = students.map((s) => s._id);
+
+//   const enrollments = await Enrollment.find({
+//     schoolId: req.schoolId,
+//     student: { $in: studentIds },
+//     status: { $ne: "DROPPED" },
+//     ...(academicYear ? { academicYear } : {}),
+//     ...(className ? { className } : {}),
+//     ...(section ? { section } : {}),
+//   })
+//     .populate("class", "className")
+//     .lean();
+
+//   const enrollmentMap = new Map(
+//     enrollments.map((e) => [String(e.student), e])
+//   );
+
+//   const mergedStudents = students.map((s) => {
+//     const e = enrollmentMap.get(String(s._id));
+//     return {
+//       ...s,
+//       class: e?.class || null,
+//       className: e?.className || null,
+//       section: e?.section || null,
+//       rollNumber: e?.rollNumber || null,
+//       academicYear: e?.academicYear || null,
+//       enrollmentId: e?._id || null,
+//     };
+//   });
+
+//   return paginatedResponse(
+//     res,
+//     "Students retrieved successfully",
+//     mergedStudents,
+//     page,
+//     limit,
+//     total
+//   );
+// });
 export const getAllStudents = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPaginationParams(req);
   const { className, section, academicYear, status, search } = req.query;
-  
-  let studentFilter = { schoolId: req.schoolId };
-  if (status) studentFilter.status = status;
-  if (search) studentFilter.$text = { $search: search };
 
-  let studentIds = null;
-  if (status || search) {
-    const matchedStudents = await Student.find(studentFilter).select('_id');
-    studentIds = matchedStudents.map(s => s._id);
+  const filter = { schoolId: req.schoolId };
+
+  if (status) filter.status = status;
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { studentID: { $regex: search, $options: "i" } },
+      { email: { $regex: search, $options: "i" } },
+      { mobileNumber: { $regex: search, $options: "i" } },
+      { fatherName: { $regex: search, $options: "i" } },
+    ];
   }
 
-  let enrollFilter = { schoolId: req.schoolId, status: { $ne: 'DROPPED' } };
-  if (academicYear) enrollFilter.academicYear = academicYear;
-  if (className) enrollFilter.className = className;
-  if (section) enrollFilter.section = section;
-  if (studentIds !== null) enrollFilter.student = { $in: studentIds };
-  
-  const [enrollments, total] = await Promise.all([
-    Enrollment.find(enrollFilter)
-      .populate({ path: 'student', select: '-password' })
-      .populate('class', 'className')
-      .sort({ rollNumber: 1 })
+  const [students, total] = await Promise.all([
+    Student.find(filter)
+      .select("-password")
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-    Enrollment.countDocuments(enrollFilter)
+    Student.countDocuments(filter),
   ]);
-  
-  const students = enrollments.map(e => {
-    if (!e.student) return null;
-    return {
-      ...e.student,
-      class: e.class,
-      className: e.className,
-      section: e.section,
-      rollNumber: e.rollNumber,
-      academicYear: e.academicYear,
-      enrollmentId: e._id
-    };
-  }).filter(Boolean);
 
-  return paginatedResponse(res, 'Students retrieved successfully', students, page, limit, total);
+  const studentIds = students.map((s) => s._id);
+
+  const enrollments = await Enrollment.find({
+    schoolId: req.schoolId,
+    student: { $in: studentIds },
+    status: { $ne: "DROPPED" },
+    ...(academicYear ? { academicYear } : {}),
+    ...(className ? { className } : {}),
+    ...(section ? { section } : {}),
+  })
+    .populate("class", "className")
+    .lean();
+
+  const enrollmentMap = new Map(enrollments.map((e) => [String(e.student), e]));
+
+  const mergedStudents = students.map((s) => {
+    const e = enrollmentMap.get(String(s._id));
+    return {
+      ...s,
+      class: e?.class || null,
+      className: e?.className || null,
+      section: e?.section || null,
+      rollNumber: e?.rollNumber || null,
+      academicYear: e?.academicYear || null,
+      enrollmentId: e?._id || null,
+    };
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Students retrieved successfully",
+    data: mergedStudents,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
 });
+
 
 // Get student by ID - MULTI-TENANT
 export const getStudentById = asyncHandler(async (req, res) => {
@@ -125,8 +262,10 @@ export const getStudentById = asyncHandler(async (req, res) => {
     _id: studentId,
     schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
   })
-    .select('-password')
-    .lean();
+      .select("-password")
+  .populate("parent", "name parentID phone email")
+  .populate("schoolId", "name")
+  .lean();
   
   if (!student) {
     throw new NotFoundError('Student');
@@ -746,19 +885,176 @@ if (dateOfBirth) {
 });
 
 // Update student - MULTI-TENANT
+// export const updateStudent = asyncHandler(async (req, res) => {
+//   const { studentId } = req.params;
+//   const updateData = req.body;
+  
+//   delete updateData.password;
+//   delete updateData.studentID;
+//   delete updateData.role;
+//   delete updateData.schoolId;  // Prevent school change
+  
+//  // ✅ Handle profile picture upload
+//   if (req.file) {
+//     const existingStudent = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
+//     if (existingStudent && existingStudent.profilePicturePublicId) {
+//       await deleteFromCloudinary(existingStudent.profilePicturePublicId);
+//     }
+//     updateData.profilePicture = req.file.path;
+//     updateData.profilePicturePublicId = req.file.filename;
+//   }
+
+//   const student = await Student.findOneAndUpdate(
+//     { 
+//       _id: studentId,
+//       schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
+//     },
+//     updateData,
+//     { new: true, runValidators: true }
+//   ).select('-password').lean();
+  
+//   if (!student) {
+//     throw new NotFoundError('Student');
+//   }
+  
+//   return successResponse(res, 'Student updated successfully', student);
+// });
+
+// export const updateStudent = asyncHandler(async (req, res) => {
+//   const { studentId } = req.params;
+//   const body = req.body;
+
+//   const updateData = {
+//     name: body.name,
+//   mobileNumber: body.mobileNumber || body.phone,
+//     email: body.email,
+//     dateOfBirth: body.dateOfBirth,
+//     gender: body.gender,
+//     bloodGroup: body.bloodGroup,
+//     nationality: body.nationality,
+//     status: body.status,
+//     medicalHistory: body.medicalHistory,
+//     allergies: body.allergies,
+//     emergencyContact: {
+//       name: body.emergencyContactName,
+//       phone: body.emergencyContactPhone,
+//       relation: body.emergencyContactRelation,
+//     },
+//     transportRequired: body.transportRequired === true || body.transportRequired === "true",
+//     busRoute: body.busRoute,
+//     pickupPoint: body.pickupPoint,
+//     parent: body.parent,
+//      address: {
+//       street: body.street,
+//       city: body.city,
+//       state: body.state,
+//       pincode: body.pincode,
+//       country: body.country || "India",
+//     },
+//     isHandicapped: body.isHandicapped === true || body.isHandicapped === "true",
+//     // either keep as string OR keep as object, but not both
+//   };
+
+//   Object.keys(updateData).forEach((k) => updateData[k] === undefined && delete updateData[k]);
+
+//   if (req.file) {
+//     const existingStudent = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
+//     if (existingStudent?.profilePicturePublicId) {
+//       await deleteFromCloudinary(existingStudent.profilePicturePublicId);
+//     }
+//     updateData.profilePicture = req.file.path;
+//     updateData.profilePicturePublicId = req.file.filename;
+//   }
+
+//   const student = await Student.findOneAndUpdate(
+//     { _id: studentId, schoolId: req.schoolId },
+//     { $set: updateData },
+//     { new: true, runValidators: true }
+//   ).select("-password").lean();
+
+//   if (!student) throw new NotFoundError("Student");
+//   return successResponse(res, "Student updated successfully", student);
+// });
+
 export const updateStudent = asyncHandler(async (req, res) => {
   const { studentId } = req.params;
-  const updateData = req.body;
-  
-  delete updateData.password;
-  delete updateData.studentID;
-  delete updateData.role;
-  delete updateData.schoolId;  // Prevent school change
-  
- // ✅ Handle profile picture upload
+  const body = req.body;
+
+  const existingStudent = await Student.findOne({
+    _id: studentId,
+    schoolId: req.schoolId,
+  })
+    .populate("parent", "name _id")
+    .lean();
+
+  if (!existingStudent) throw new NotFoundError("Student");
+
+  if (body.email) {
+    const duplicateEmail = await Student.findOne({
+      schoolId: req.schoolId,
+      email: body.email.toLowerCase().trim(),
+      _id: { $ne: studentId },
+    }).lean();
+
+    if (duplicateEmail) {
+      throw new ValidationError(`Email ${body.email} is already registered`);
+    }
+  }
+
+  let parentValue = body.parent;
+
+  if (Array.isArray(parentValue)) {
+    parentValue =
+      parentValue.find((v) => /^[0-9a-fA-F]{24}$/.test(v)) || undefined;
+  }
+
+  if (
+    parentValue &&
+    parentValue !== "[object Object]" &&
+    !/^[0-9a-fA-F]{24}$/.test(parentValue)
+  ) {
+    throw new ValidationError("Invalid parent ID");
+  }
+
+  const updateData = {
+    name: body.name,
+    mobileNumber: body.mobileNumber || body.phone,
+    email: body.email ? body.email.toLowerCase().trim() : undefined,
+    dateOfBirth: body.dateOfBirth || undefined,
+    gender: body.gender,
+    bloodGroup: body.bloodGroup,
+    nationality: body.nationality,
+    status: body.status,
+    medicalHistory: body.medicalHistory,
+    allergies: body.allergies
+      ? body.allergies.split(",").map((a) => a.trim()).filter(Boolean)
+      : undefined,
+    emergencyContact: {
+      name: body.emergencyContactName,
+      phone: body.emergencyContactPhone,
+      relation: body.emergencyContactRelation,
+    },
+    transportRequired:
+      body.transportRequired === true || body.transportRequired === "true",
+    busRoute: body.busRoute,
+    pickupPoint: body.pickupPoint,
+    parent: parentValue,
+    address: {
+      street: body.street,
+      city: body.city,
+      state: body.state,
+      pincode: body.pincode,
+      country: body.country || "India",
+    },
+    isHandicapped: body.isHandicapped === true || body.isHandicapped === "true",
+  };
+
+  Object.keys(updateData).forEach(
+    (k) => updateData[k] === undefined && delete updateData[k]
+  );
+
   if (req.file) {
-    const existingStudent = await Student.findOne({ _id: studentId, schoolId: req.schoolId });
-    if (existingStudent && existingStudent.profilePicturePublicId) {
+    if (existingStudent.profilePicturePublicId) {
       await deleteFromCloudinary(existingStudent.profilePicturePublicId);
     }
     updateData.profilePicture = req.file.path;
@@ -766,19 +1062,16 @@ export const updateStudent = asyncHandler(async (req, res) => {
   }
 
   const student = await Student.findOneAndUpdate(
-    { 
-      _id: studentId,
-      schoolId: req.schoolId  // ✅ MULTI-TENANT FILTER
-    },
-    updateData,
+    { _id: studentId, schoolId: req.schoolId },
+    { $set: updateData },
     { new: true, runValidators: true }
-  ).select('-password').lean();
-  
-  if (!student) {
-    throw new NotFoundError('Student');
-  }
-  
-  return successResponse(res, 'Student updated successfully', student);
+  )
+    .select("-password")
+    .lean();
+
+  if (!student) throw new NotFoundError("Student");
+
+  return successResponse(res, "Student updated successfully", student);
 });
 
 // Delete student - MULTI-TENANT
@@ -974,6 +1267,32 @@ export const promoteStudents = asyncHandler(async (req, res) => {
   return successResponse(res, `Successfully promoted ${studentIds.length} students`, {
     promoted: studentIds.length
   });
+});
+
+
+export const changeStudentPassword = asyncHandler(async (req, res) => {
+  const { studentId } = req.params;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new ValidationError("Password must be at least 6 characters");
+  }
+
+  const student = await Student.findOne({
+    _id: studentId,
+    schoolId: req.schoolId,
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student");
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  student.password = hashedPassword;
+  await student.save();
+
+  return successResponse(res, "Password updated successfully");
 });
 
 export default {

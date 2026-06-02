@@ -77,6 +77,7 @@ logger.info("Environment variables loaded", {
   MONGODB_URI_EXISTS: !!process.env.MONGODB_URI
 });
 const app = express();
+app.set('trust proxy', true); // Trust proxy headers for platforms like Vercel/Render
 const isProd = process.env.NODE_ENV === 'production';
 
 // ========================================

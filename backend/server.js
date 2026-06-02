@@ -77,7 +77,7 @@ logger.info("Environment variables loaded", {
   MONGODB_URI_EXISTS: !!process.env.MONGODB_URI
 });
 const app = express();
-app.set('trust proxy', true); // Trust proxy headers for platforms like Vercel/Render
+app.set('trust proxy', 1); // Trust only the 1st proxy (Render) to prevent IP spoofing & rate-limit error
 const isProd = process.env.NODE_ENV === 'production';
 
 // ========================================
@@ -96,7 +96,10 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [];
+// Parse allowed origins, trim spaces, and remove trailing slashes to prevent CORS mismatch
+const allowedOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',').map(url => url.trim().replace(/\/$/, '')) 
+  : [];
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || !isProd || allowedOrigins.includes(origin)) {

@@ -42,10 +42,32 @@ export const registerAdmin = async (req, res) => {
     const passwordPlain = generateSecurePassword();
     const passwordHash = await bcrypt.hash(passwordPlain, 10);
 
-    // 🆔 adminID
-    const count = await Admin.countDocuments({ schoolId });
+    // 🆔 adminID - ROBUST GENERATION
     const year = new Date().getFullYear().toString().slice(-2);
-    const adminID = `ADM${year}${String(count + 1).padStart(3, "0")}`;
+
+    // Find the highest admin ID for THIS SCHOOL to determine the next number
+    const lastAdmin = await Admin.findOne({ schoolId })
+      .sort({ adminID: -1 }) // Sort by adminID descending to find the last one
+      .lean();
+      
+    let nextAdminNumber = 1;
+    if (lastAdmin && lastAdmin.adminID) {
+      // Extracts the numeric part of the ID, assuming format ADMYYXXX
+      const match = lastAdmin.adminID.match(/\d{3}$/);
+      if (match) {
+        nextAdminNumber = parseInt(match[0], 10) + 1;
+      }
+    }
+    
+    let adminID = `ADM${year}${String(nextAdminNumber).padStart(3, "0")}`;
+    
+    // Double-check to prevent race condition collisions
+    let idExists = await Admin.findOne({ adminID, schoolId }).lean();
+    while (idExists) {
+      nextAdminNumber++;
+      adminID = `ADM${year}${String(nextAdminNumber).padStart(3, "0")}`;
+      idExists = await Admin.findOne({ adminID, schoolId }).lean();
+    }
 
     let parsedAddress = {};
 

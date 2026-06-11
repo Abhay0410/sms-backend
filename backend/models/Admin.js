@@ -9,7 +9,7 @@ const adminSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true },
-  adminID: { type: String, required: true, unique: true },
+  adminID: { type: String, required: true },
   phone: { type: String, required: true },
   
   dateOfBirth: Date,
@@ -62,6 +62,7 @@ const adminSchema = new mongoose.Schema({
 
 adminSchema.index({ schoolId: 1 });
 adminSchema.index({ schoolId: 1, email: 1 });
+adminSchema.index({ schoolId: 1, adminID: 1 }, { unique: true }); // ✅ Ensures adminID is unique ONLY within the same school
 
 // ✅ TEXT INDEX FOR SEARCH OPTIMIZATION
 adminSchema.index(
@@ -85,4 +86,9 @@ adminSchema.pre('aggregate', function(next) {
   next();
 });
 
-export default mongoose.model('Admin', adminSchema);
+const Admin = mongoose.model('Admin', adminSchema);
+
+// ✅ This tells Mongoose to delete old indexes from MongoDB that are no longer in this schema (like the old adminID_1 global index)
+Admin.syncIndexes().then(() => console.log('Admin indexes synced successfully.')).catch(console.error);
+
+export default Admin;

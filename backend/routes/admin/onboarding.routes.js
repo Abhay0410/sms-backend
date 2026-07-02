@@ -6,7 +6,8 @@ import {
   importAcademics, 
   importTeachers,
   importFeeStructures,
-  importFeePayments
+  importFeePayments,
+  importLibraryBooks
 } from '../../controllers/admin/onboarding.controller.js';
 import { requireAuth } from '../../middleware/auth.js';
 
@@ -29,4 +30,8 @@ router.post('/import-fee-structures', upload.single('file'), importFeeStructures
 
 // Step 5: Fee Payments 
 router.post('/import-fee-payments', upload.single('file'), importFeePayments);
+
+// Step 6: Library Books
+router.post('/import-library-books', upload.single('file'), importLibraryBooks);
+
 export default router;

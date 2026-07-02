@@ -9,6 +9,7 @@ import Teacher from '../../models/Teacher.js';
 import FeeHead from '../../models/FeeHead.js';
 import FeePayment from '../../models/FeePayment.js';
 import Enrollment from '../../models/Enrollment.js';
+import LibraryBook from '../../models/LibraryBook.js';
 import { generateInstallments } from '../../utils/fee.utils.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { successResponse } from '../../utils/response.js';
@@ -553,6 +554,89 @@ export const importFeePayments = asyncHandler(async (req, res) => {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         return successResponse(res, "Import Task Finished", results);
 
+      } catch (err) {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.status(500).json({ success: false, message: err.message });
+      }
+    });
+});
+
+// ============================================================
+// 6. IMPORT LIBRARY BOOKS (Bulk Import)
+// ============================================================
+export const importLibraryBooks = asyncHandler(async (req, res) => {
+  const schoolId = req.schoolId;
+  const filePath = req.file.path;
+  const rows = [];
+
+  fs.createReadStream(filePath)
+    .pipe(csv())
+    .on('data', (data) => rows.push(data))
+    .on('end', async () => {
+      try {
+        let successCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        const errorDetails = [];
+
+        for (const row of rows) {
+          const title = getVal(row, 'Title');
+          const author = getVal(row, 'Author');
+          const serialCode = getVal(row, 'SerialCode') || getVal(row, 'Serial Code') || getVal(row, 'serialcode');
+
+          if (!title || !author || !serialCode) {
+            errorCount++;
+            errorDetails.push(`Row missing Title, Author, or SerialCode: ${JSON.stringify(row)}`);
+            continue;
+          }
+
+          // Check if serialCode already exists in this school
+          const existing = await LibraryBook.findOne({ schoolId, serialCode });
+          if (existing) {
+            skippedCount++;
+            continue;
+          }
+
+          let rawPrice = getVal(row, 'Price');
+          let price = rawPrice ? Number(rawPrice) : undefined;
+          if (price !== undefined && isNaN(price)) {
+            price = undefined;
+          }
+
+          let rawStatus = getVal(row, 'Status').toUpperCase();
+          const allowedStatuses = ['AVAILABLE', 'ISSUED', 'LOST', 'DAMAGED', 'RESERVED'];
+          let status = allowedStatuses.includes(rawStatus) ? rawStatus : 'AVAILABLE';
+
+          try {
+            await LibraryBook.create({
+              schoolId,
+              title,
+              author,
+              isbn: getVal(row, 'ISBN') || undefined,
+              serialCode,
+              category: getVal(row, 'Category') || 'ACADEMIC',
+              subject: getVal(row, 'Subject') || undefined,
+              rackNumber: getVal(row, 'RackNumber') || getVal(row, 'Rack Number') || undefined,
+              price,
+              status
+            });
+            successCount++;
+          } catch (createErr) {
+            errorCount++;
+            console.log(`❌ Error creating book "${title}":`, createErr.message);
+            errorDetails.push(`Book "${title}": ${createErr.message}`);
+          }
+        }
+
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+        const finalMsg = `Imported: ${successCount} | Skipped: ${skippedCount} | Failed: ${errorCount}`;
+
+        return res.status(200).json({
+          success: true,
+          message: finalMsg,
+          errors: errorDetails
+        });
       } catch (err) {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         res.status(500).json({ success: false, message: err.message });

@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { upload } from "../../middleware/upload.js";
+import { checkStorageLimit } from "../../middleware/checkStorageLimit.js";
 import {
   createTeacher,
   getTeachers,
@@ -25,12 +26,12 @@ router.use(requireAuth(["admin"]));
 // Teacher CRUD
 // router.post("/", createTeacher);
 // router.post("/create", createTeacher); // Alias for backward compatibility
-router.post("/", upload.single("profilePicture"), createTeacher);
-router.post("/create", upload.single("profilePicture"), createTeacher);
+router.post("/", checkStorageLimit, upload.single("profilePicture"), createTeacher);
+router.post("/create", checkStorageLimit, upload.single("profilePicture"), createTeacher);
 router.get("/", getAllTeachers);
 router.get("/list", getTeachers); // Alias for backward compatibility
 router.get("/:teacherId", getTeacherById);
-router.put("/:teacherId", upload.single("profilePicture"), updateTeacher);
+router.put("/:teacherId", checkStorageLimit, upload.single("profilePicture"), updateTeacher);
 router.delete("/:teacherId", deleteTeacher);
 
 // Teacher assignments

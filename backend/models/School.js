@@ -16,6 +16,8 @@ const schoolSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   subscriptionPlan: { type: String, default: 'BASIC' },
   maxStudents: { type: Number, default: 1000 },
+  maxStaff: { type: Number, default: 50 },
+  maxStorageMB: { type: Number, default: 5000 },
   setupCompleted: { type: Boolean, default: false },
   
   // SaaS / Multi-Tenant Fields

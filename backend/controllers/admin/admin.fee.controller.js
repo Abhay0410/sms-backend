@@ -1127,6 +1127,8 @@ export const getAllPayments = asyncHandler(async (req, res) => {
     });
   });
 
+  formattedPayments.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+
   return res.status(200).json({
     success: true,
     data: { 

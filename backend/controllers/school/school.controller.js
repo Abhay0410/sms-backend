@@ -1,4 +1,5 @@
 import School from '../../models/School.js';
+import SubscriptionPlan from '../../models/SubscriptionPlan.js';
 import Admin from '../../models/Admin.js';
 import Class from '../../models/Class.js';
 import bcrypt from 'bcryptjs';
@@ -338,7 +339,7 @@ const createClassesForSchool = async (schoolId, academicYear = '2025-2026') => {
 
 export const registerSchool = async (req, res) => {
   try {
-    const { schoolName, schoolCode, subdomain, adminDetails, academicYear = '2025-2026' } = req.body;
+    const { schoolName, schoolCode, subdomain, adminDetails, selectedPlan, academicYear = '2025-2026' } = req.body;
     
     // 1. Validate schoolCode unique
     const existingSchool = await School.findOne({ 
@@ -351,6 +352,10 @@ export const registerSchool = async (req, res) => {
       });
     }
 
+    // Fetch subscription plan
+    const planName = (selectedPlan || 'STARTER').toUpperCase();
+    const plan = await SubscriptionPlan.findOne({ name: planName });
+
     // 2. Create School
     const school = await School.create({
       schoolName,
@@ -362,6 +367,12 @@ export const registerSchool = async (req, res) => {
         city: adminDetails.address?.city || 'Pending',
         state: adminDetails.address?.state || 'Pending'
       },
+      subscription: plan ? plan._id : undefined,
+      subscriptionPlan: plan ? plan.name : 'STARTER',
+      modulesEnabled: plan ? (plan.features || []) : [],
+      maxStudents: plan ? (plan.limits?.maxStudents || 150) : 150,
+      maxStaff: plan ? (plan.limits?.maxStaff || 15) : 15,
+      maxStorageMB: plan ? (plan.limits?.maxStorageMB || 2048) : 2048,
       setupCompleted: false
     });
 

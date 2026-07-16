@@ -1,6 +1,19 @@
 // controllers/admin/admin.student.controller.js - MULTI-TENANT VERSION
 import Student from '../../models/Student.js';
+import School from '../../models/School.js';
+import { updateStorageUsed } from '../../utils/limits.js';
 import Parent from '../../models/Parent.js';
+
+// Helper to check student capacity limit
+async function checkStudentLimit(schoolId, countToAdd = 1) {
+  const school = await School.findById(schoolId).select("maxStudents").lean();
+  if (school && school.maxStudents !== -1) {
+    const activeStudentCount = await Student.countDocuments({ schoolId, isDeleted: false });
+    if (activeStudentCount + countToAdd > school.maxStudents) {
+      throw new ValidationError(`Student limit reached. Your plan allows up to ${school.maxStudents} students (currently hosting ${activeStudentCount}). Please upgrade your subscription plan.`);
+    }
+  }
+}
 import Class from '../../models/Class.js';
 import mongoose from 'mongoose';
 import Enrollment from '../../models/Enrollment.js';
@@ -219,6 +232,8 @@ export const createStudentWithParent = asyncHandler(async (req, res) => {
   if (!studentName || !className || !academicYear) {
     throw new ValidationError('Student name, class, and academic year are required');
   }
+
+  await checkStudentLimit(req.schoolId, 1);
   
   if (!fatherName) {
     throw new ValidationError('Father name is required');
@@ -526,6 +541,12 @@ if (dateOfBirth) {
         status: 'ACTIVE'
       });
       await enrollment.save({ session });
+
+      const sectionData = classDoc.sections.find(s => s.sectionName === section);
+      if (sectionData) {
+        sectionData.currentStrength += 1;
+        await classDoc.save({ session });
+      }
     }
     
     await session.commitTransaction();
@@ -605,6 +626,8 @@ if (req.file) {
   if (!name || !fatherName || !className || !academicYear) {
     throw new ValidationError('Name, father name, class, and academic year are required');
   }
+
+  await checkStudentLimit(req.schoolId, 1);
   
   // ✅ FIND CLASS - MULTI-TENANT
   const classDoc = await findClassByName(className, academicYear, req.schoolId);
@@ -774,6 +797,10 @@ export const updateStudent = asyncHandler(async (req, res) => {
     { new: true, runValidators: true }
   ).select('-password').lean();
   
+  if (student && req.file && req.file.size) {
+    await updateStorageUsed(req.schoolId, req.file.size);
+  }
+  
   if (!student) {
     throw new NotFoundError('Student');
   }
@@ -851,6 +878,8 @@ export const bulkUploadStudent = asyncHandler(async (req, res) => {
   if (!students || !Array.isArray(students) || students.length === 0) {
     throw new ValidationError('Students array is required');
   }
+
+  await checkStudentLimit(req.schoolId, students.length);
   
   const results = {
     success: [],

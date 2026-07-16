@@ -19,6 +19,7 @@ const adminSchema = new mongoose.Schema({
     street: String,
     city: String,
     state: String,
+    district: String,
     pincode: String,
     country: { type: String, default: 'India' }
   },

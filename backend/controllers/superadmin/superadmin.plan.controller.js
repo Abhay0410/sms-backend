@@ -26,8 +26,8 @@ export const getPlanById = asyncHandler(async (req, res) => {
 export const createPlan = asyncHandler(async (req, res) => {
   const { name, monthlyPrice, yearlyPrice, limits, features } = req.body;
 
-  if (!name || monthlyPrice === undefined || yearlyPrice === undefined || !limits || limits.maxStudents === undefined) {
-    throw new ValidationError("Name, monthlyPrice, yearlyPrice, and limits.maxStudents are required");
+  if (!name || monthlyPrice === undefined || yearlyPrice === undefined || !limits || limits.maxStudents === undefined || limits.maxStaff === undefined) {
+    throw new ValidationError("Name, monthlyPrice, yearlyPrice, limits.maxStudents, and limits.maxStaff are required");
   }
 
   const existingPlan = await SubscriptionPlan.findOne({ name: name.toUpperCase() });
@@ -78,7 +78,14 @@ export const assignPlanToSchool = asyncHandler(async (req, res) => {
 
   const school = await School.findByIdAndUpdate(
     schoolId,
-    { subscription: plan._id, modulesEnabled: plan.features || [], subscriptionPlan: plan.name, maxStudents: plan.limits?.maxStudents || 1000 },
+    { 
+      subscription: plan._id, 
+      modulesEnabled: plan.features || [], 
+      subscriptionPlan: plan.name, 
+      maxStudents: plan.limits?.maxStudents !== undefined ? plan.limits.maxStudents : 1000,
+      maxStaff: plan.limits?.maxStaff !== undefined ? plan.limits.maxStaff : 50,
+      maxStorageMB: plan.limits?.maxStorageMB !== undefined ? plan.limits.maxStorageMB : 5000
+    },
     { new: true }
   );
   if (!school) throw new NotFoundError("School not found");

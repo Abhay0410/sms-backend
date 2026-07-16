@@ -7,6 +7,7 @@ import { successResponse, paginatedResponse } from '../../utils/response.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
+import { updateStorageUsed } from '../../utils/limits.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -154,6 +155,13 @@ export const createAnnouncement = asyncHandler(async (req, res) => {
   });
   
   await announcement.save();
+  
+  // Track storage used
+  const totalSize = attachments.reduce((sum, f) => sum + (f.fileSize || 0), 0);
+  if (totalSize > 0) {
+    await updateStorageUsed(req.schoolId, totalSize);
+  }
+  
   await announcement.populate('targetAudience.specificClasses.class', 'className');
   
   return successResponse(res, 'Announcement created successfully', announcement, 201);
@@ -245,8 +253,13 @@ export const deleteAttachment = asyncHandler(async (req, res) => {
     }
   }
   
+  const attachmentSize = attachment.fileSize || 0;
   announcement.attachments.pull(attachmentId);
   await announcement.save();
+  
+  if (attachmentSize > 0) {
+    await updateStorageUsed(req.schoolId, -attachmentSize);
+  }
   
   return successResponse(res, 'Attachment deleted successfully');
 });
@@ -275,7 +288,12 @@ export const deleteAnnouncement = asyncHandler(async (req, res) => {
     }
   }
   
+  const totalSize = announcement.attachments?.reduce((sum, f) => sum + (f.fileSize || 0), 0) || 0;
   await announcement.deleteOne();
+  
+  if (totalSize > 0) {
+    await updateStorageUsed(req.schoolId, -totalSize);
+  }
   
   return successResponse(res, 'Announcement deleted successfully');
 });

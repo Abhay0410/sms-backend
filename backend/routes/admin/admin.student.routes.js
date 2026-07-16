@@ -13,6 +13,7 @@ import {
   promoteStudents
 } from "../../controllers/admin/admin.student.controller.js";
 import { upload } from "../../middleware/upload.js";
+import { checkStorageLimit } from "../../middleware/checkStorageLimit.js";
 
 const router = Router();
 
@@ -28,7 +29,7 @@ router.get("/:studentId", getStudentById);
 router.post("/", createStudent); // Simple create
 router.post("/with-parent", createStudentWithParent); // ✅ Full registration
 
-router.put("/:studentId",upload.single("profilePicture"), updateStudent);
+router.put("/:studentId", checkStorageLimit, upload.single("profilePicture"), updateStudent);
 router.delete("/:studentId", deleteStudent);
 // router.post("/bulk-upload", bulkUploadStudents);
 router.put("/:studentId/status", updateStudentStatus);

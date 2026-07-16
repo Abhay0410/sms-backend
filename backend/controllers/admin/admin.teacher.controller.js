@@ -8,6 +8,7 @@ import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import { getPaginationParams } from '../../utils/pagination.js';
 import { generateSecurePassword } from '../../utils/password.js';
 import { deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { checkStaffLimit, updateStorageUsed } from '../../utils/limits.js';
 
 
 // Get all teachers (FRONTEND COMPATIBLE) - MULTI-TENANT
@@ -136,6 +137,8 @@ if (subjects) {
   if (!name || !email || !phone) {
     throw new ValidationError('Name, email, and phone are required');
   }
+
+  await checkStaffLimit(req.schoolId, 1);
   
   // Check if email exists - MULTI-TENANT
   const existingTeacher = await Teacher.findOne({ 
@@ -212,6 +215,9 @@ if (req.file) {
   });
   
   await teacher.save();
+  if (req.file && req.file.size) {
+    await updateStorageUsed(req.schoolId, req.file.size);
+  }
   
   const teacherResponse = teacher.toObject();
   delete teacherResponse.password;
@@ -257,6 +263,10 @@ export const updateTeacher = asyncHandler(async (req, res) => {
     updateData,
     { new: true, runValidators: true }
   ).select('-password').lean();
+  
+  if (teacher && req.file && req.file.size) {
+    await updateStorageUsed(req.schoolId, req.file.size);
+  }
   
   if (!teacher) {
     throw new NotFoundError('Teacher');

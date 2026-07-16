@@ -8,6 +8,7 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import Expense from '../../models/Expense.js';
 import ExpenseCategory from '../../models/ExpenseCategory.js';
+import { checkStaffLimit } from '../../utils/limits.js';
 
 // ==============================================
 // 1. VEHICLE MANAGEMENT
@@ -81,6 +82,7 @@ export const deleteVehicle = asyncHandler(async (req, res) => {
 // ==============================================
 
 export const addTransportStaff = asyncHandler(async (req, res) => {
+  await checkStaffLimit(req.schoolId, 1);
   const payload = { ...req.body };
   
   // Safely map common frontend mismatches

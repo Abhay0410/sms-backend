@@ -295,7 +295,7 @@ export const importStudents = asyncHandler(async (req, res) => {
                 email: getVal(row, 'ParentEmail') || `p_${finalParentID}@school.com`,
                 password: pass, 
                 parentID: finalParentID,
-                relation: 'Father', // ✅ FIX: Add required relation
+                relation: 'Father', 
                 role: 'parent', 
                 isActive: true,
               });
@@ -303,13 +303,18 @@ export const importStudents = asyncHandler(async (req, res) => {
 
             // 6. 🚀 CREATE STUDENT
             const newStudent = await Student.create({
-              schoolId, name: rawName, studentID: finalID, admissionNumber: csvAdmissionID,
+              schoolId, 
+              name: rawName, 
+              studentID: finalID, 
+              admissionNumber: csvAdmissionID,
+              mobileNumber: parentPhone || '0000000000', 
               password: pass, 
               registrationYear: academicYear,
               targetGrade: targetClass.className, 
               parent: parent._id,
-              gender: getVal(row, 'Gender') || 'Male', status: 'ACTIVE',
-              fatherName: getVal(row, 'ParentName') || rawName // ✅ FIX: Add required fatherName
+              gender: getVal(row, 'Gender') || 'Male', 
+              status: 'ACTIVE',
+              fatherName: getVal(row, 'ParentName') || rawName 
             });
 
             await Enrollment.create({
@@ -318,11 +323,20 @@ export const importStudents = asyncHandler(async (req, res) => {
               class: targetClass._id,
               className: targetClass.className,
               section: getVal(row, 'Section') || 'A',
+              rollNumber: parseInt(getVal(row, 'RollNumber')) || undefined, 
               academicYear,
               status: 'ACTIVE'
             });
 
             await Parent.findByIdAndUpdate(parent._id, { $addToSet: { children: newStudent._id } });
+
+            // ✅ Increment section strength in Class document
+            const targetSection = getVal(row, 'Section') || 'A';
+            await Class.updateOne(
+              { _id: targetClass._id, "sections.sectionName": targetSection },
+              { $inc: { "sections.$.currentStrength": 1 } }
+            );
+
             results.success++;
             console.log(`✅ Created: ${rawName} (${finalID})`);
 
@@ -429,29 +443,39 @@ export const importFeeStructures = asyncHandler(async (req, res) => {
               await targetClass.save();
               results.updatedClasses++;
 
-              // 6. Sync Students of this class
-              const students = await Student.find({ class: targetClass._id, academicYear, schoolId });
-              if (students.length > 0) {
-                const bulkOps = students.map(student => {
+              // 6. Sync Students of this class via their Enrollments
+              const enrollments = await Enrollment.find({ class: targetClass._id, academicYear, schoolId, status: 'ACTIVE' }).populate('student');
+              if (enrollments.length > 0) {
+                const bulkOps = enrollments.map(enroll => {
+                  const student = enroll.student;
+                  if (!student) return null;
                   const installments = generateInstallments(newFeeStructure, academicYear);
                   const total = installments.reduce((s, i) => s + i.amount, 0);
                   return {
                     updateOne: {
                       filter: { student: student._id, academicYear, schoolId },
                       update: { $set: { 
-                        class: student.class, installments, totalDue: total, 
-                        balancePending: total, status: 'PENDING',
-                        className: targetClass.className, section: student.section,
-                        studentName: student.name, studentID: student.studentID
+                        class: enroll.class, 
+                        installments, 
+                        totalDue: total, 
+                        balancePending: total, 
+                        status: 'PENDING',
+                        className: targetClass.className, 
+                        section: enroll.section,
+                        studentName: student.name, 
+                        studentID: student.studentID
                       }},
                       upsert: true
                     }
                   };
-                });
-                await FeePayment.bulkWrite(bulkOps);
-                results.studentsSynced += students.length;
+                }).filter(Boolean);
+ 
+                if (bulkOps.length > 0) {
+                  await FeePayment.bulkWrite(bulkOps);
+                  results.studentsSynced += bulkOps.length;
+                }
               }
-              console.log(`✅ Fully Synced: ${className} (${students.length} students)`);
+              console.log(`✅ Fully Synced: ${className} (${enrollments.length} students synced)`);
             }
           } catch (err) {
             results.errors.push(`${className}: ${err.message}`);
@@ -532,7 +556,7 @@ export const importFeePayments = asyncHandler(async (req, res) => {
             fee.payments.push({
               amount: amountPaid,
               paymentMode,
-              paymentDate: row.Date ? new Date(row.Date) : new Date(),
+              paymentDate: paymentDate,
               receiptNumber: `MIG-${Date.now()}-${results.success}`,
               remarks,
               installmentsCovered: covered

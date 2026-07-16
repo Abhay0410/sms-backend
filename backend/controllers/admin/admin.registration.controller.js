@@ -6,6 +6,7 @@ import { HTTP_STATUS } from "../../constants/httpStatus.js";
 import { generateSecurePassword } from "../../utils/password.js";
 import { z } from "zod";
 import { deleteFromCloudinary } from "../../utils/cloudinary.js";
+import { checkStaffLimit, updateStorageUsed } from "../../utils/limits.js";
 
 const registerAdminSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -37,6 +38,8 @@ export const registerAdmin = async (req, res) => {
 
     const existing = await Admin.findOne({ email: email.toLowerCase() });
     if (existing) throw new ValidationError("Admin already exists");
+
+    await checkStaffLimit(schoolId, 1);
 
     // 🔐 password
     const passwordPlain = generateSecurePassword();
@@ -126,6 +129,10 @@ if (address) {
       isSuperAdmin: isSuperAdminParsed,
     });
     
+    if (req.file && req.file.size) {
+      await updateStorageUsed(schoolId, req.file.size);
+    }
+    
 
     return res.status(HTTP_STATUS.CREATED).json({
   success: true,
@@ -190,6 +197,9 @@ parsedAddress = {
 
     // 5️⃣ Update admin
     const admin = await Admin.findOneAndUpdate({adminID: id}, updateData, { new: true });
+    if (admin && req.file && req.file.size) {
+      await updateStorageUsed(admin.schoolId, req.file.size);
+    }
     if (!admin) throw new NotFoundError("Admin not found");
 
     res.json({

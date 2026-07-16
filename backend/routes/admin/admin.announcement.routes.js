@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { uploadAnnouncementAttachments } from "../../middleware/upload.js";
+import { checkStorageLimit } from "../../middleware/checkStorageLimit.js";
 import {
   getAllAnnouncements,
   getAnnouncementClasses,
@@ -28,6 +29,7 @@ router.get("/classes", getAnnouncementClasses);
 // Create announcement (with file uploads - up to 5 files)
 router.post(
   "/",
+  checkStorageLimit,
   uploadAnnouncementAttachments.array("attachments", 5),
   createAnnouncement
 );
@@ -35,6 +37,7 @@ router.post(
 // Update announcement (with optional file uploads)
 router.put(
   "/:id",
+  checkStorageLimit,
   uploadAnnouncementAttachments.array("attachments", 5),
   updateAnnouncement
 );

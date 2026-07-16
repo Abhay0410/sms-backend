@@ -130,7 +130,6 @@ studentSchema.index(
   { schoolId: 1, email: 1 }, 
   { 
     unique: true, 
-    sparse: true, 
     partialFilterExpression: { email: { $type: "string" } } 
   }
 );
@@ -138,7 +137,10 @@ studentSchema.index(
 // ✅ NEW UNIQUE INDEXES (IMPORTANT)
 studentSchema.index(
   { schoolId: 1, enrollmentNumber: 1 },
-  { unique: true, sparse: true }
+  { 
+    unique: true, 
+    partialFilterExpression: { enrollmentNumber: { $type: "string" } } 
+  }
 );
 
 studentSchema.index({ schoolId: 1, targetGrade: 1 });

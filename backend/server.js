@@ -13,6 +13,9 @@ import Session from "./models/Session.js";
 import logger from "./utils/logger.js";
 import { auditLogger } from "./middleware/auditLog.js";
 import { swaggerDocs } from "./utils/swagger.js";
+import SubscriptionPlan from "./models/SubscriptionPlan.js";
+import SuperAdmin from "./models/SuperAdmin.js";
+import bcrypt from "bcryptjs";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -202,9 +205,69 @@ async function connectDB() {
     else process.exit(1);
   }
 }
+const autoSeedPlans = async () => {
+  try {
+    const planCount = await SubscriptionPlan.countDocuments();
+    if (planCount === 0) {
+      logger.info("🌱 No subscription plans found. Auto-seeding default plans...");
+      
+      const plans = [
+        {
+          name: 'STARTER',
+          monthlyPrice: 49,
+          yearlyPrice: 499,
+          limits: { maxStudents: 150, maxStaff: 15, maxStorageMB: 2048 },
+          features: [] // Core only
+        },
+        {
+          name: 'PROFESSIONAL',
+          monthlyPrice: 149,
+          yearlyPrice: 1499,
+          limits: { maxStudents: 1000, maxStaff: 75, maxStorageMB: 10240 },
+          features: ['TRANSPORT', 'INVENTORY', 'LIBRARY', 'HR', 'EXPENSE']
+        },
+        {
+          name: 'ENTERPRISE',
+          monthlyPrice: 399,
+          yearlyPrice: 3999,
+          limits: { maxStudents: -1, maxStaff: -1, maxStorageMB: -1 }, // -1 is Unlimited
+          features: ['TRANSPORT', 'INVENTORY', 'LIBRARY', 'HR', 'EXPENSE', 'PAYROLL']
+        }
+      ];
+      
+      await SubscriptionPlan.insertMany(plans);
+      logger.info("✅ Default plans seeded successfully.");
+    }
+  } catch (error) {
+    logger.error("❌ Auto-seed plans error", { error: error.message });
+  }
+};
+
+const autoSeedSuperAdmin = async () => {
+  try {
+    logger.info("🌱 Synchronizing default Super Admin...");
+    const hashedPassword = await bcrypt.hash('Superadmin@123', 10);
+    await SuperAdmin.findOneAndUpdate(
+      { email: 'superadmin@zager.com' },
+      {
+        name: 'Platform Owner',
+        password: hashedPassword,
+        role: 'superadmin',
+        isActive: true
+      },
+      { upsert: true, new: true }
+    );
+    logger.info("✅ Default Super Admin synchronized successfully.");
+  } catch (error) {
+    logger.error("❌ Auto-seed Super Admin error", { error: error.message });
+  }
+};
+
 // connectDB();
-connectDB().then(() => {
-  autoCreateSession();
+connectDB().then(async () => {
+  await autoCreateSession();
+  await autoSeedPlans();
+  await autoSeedSuperAdmin();
 });
 
 app.get("/health", (req, res) => res.json({ status: "up", env: process.env.NODE_ENV }));

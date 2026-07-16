@@ -6,6 +6,7 @@ const subscriptionPlanSchema = new mongoose.Schema({
   yearlyPrice: { type: Number, required: true, min: 0 },
   limits: {
     maxStudents: { type: Number, required: true },
+    maxStaff: { type: Number, required: true },
     maxStorageMB: { type: Number, default: 5000 } // Storage limit in Megabytes
   },
   features: [{ type: String }] // e.g., ['TRANSPORT', 'PAYROLL', 'INVENTORY']

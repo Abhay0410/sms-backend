@@ -25,6 +25,8 @@ import { getPaginationParams } from '../../utils/pagination.js';
 import { generateSecurePassword } from '../../utils/password.js';
 import logger from '../../utils/logger.js';
 import { deleteFromCloudinary } from '../../utils/cloudinary.js';
+import FeePayment from '../../models/FeePayment.js';
+import { generateInstallments } from '../../utils/fee.utils.js';
 
 // ✅ HELPER FUNCTION: Find class by name or numeric value (MULTI-TENANT)
 async function findClassByName(className, academicYear, schoolId) {
@@ -541,6 +543,27 @@ if (dateOfBirth) {
         status: 'ACTIVE'
       });
       await enrollment.save({ session });
+
+      // ✅ Create student fee roadmap (dues ledger) if class fee structure is configured
+      if (classDoc.feeStructure && classDoc.feeStructure.length > 0) {
+        const installments = generateInstallments(classDoc.feeStructure, academicYear);
+        const total = installments.reduce((sum, inst) => sum + inst.amount, 0);
+        
+        await FeePayment.create([{
+          student: student._id,
+          schoolId: req.schoolId,
+          academicYear,
+          class: classDoc._id,
+          installments,
+          totalDue: total,
+          balancePending: total,
+          status: 'PENDING',
+          className: classDoc.className,
+          section: section || 'A',
+          studentName: student.name,
+          studentID: student.studentID
+        }], { session });
+      }
 
       const sectionData = classDoc.sections.find(s => s.sectionName === section);
       if (sectionData) {

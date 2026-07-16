@@ -53,6 +53,18 @@ export const createClass = asyncHandler(async (req, res) => {
   if (!classData.className || !classData.academicYear) {
     throw new ValidationError('Class name and academic year are required');
   }
+
+  // ✅ Smart Class Name Formatting
+  let rawName = classData.className.trim();
+  const lowerName = rawName.toLowerCase();
+  if (!lowerName.startsWith('class')) {
+    const prePrimaryNames = ['nursery', 'lkg', 'ukg', 'playgroup', 'pre-nursery'];
+    const isPrePrimary = prePrimaryNames.some(p => lowerName.startsWith(p));
+    if (!isPrePrimary) {
+      rawName = `Class ${rawName}`;
+    }
+  }
+  classData.className = rawName;
  const schoolId = req.user.schoolId;  // ✅ Always use user.schoolId
 
   console.log("Logged user schoolId:", schoolId);
